@@ -6,6 +6,7 @@ import threading
 import time
 import msvcrt
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import webview
@@ -88,6 +89,32 @@ class Api:
             return {"ok": False, "error": "没有成功读取任何博主"}
         return {"ok": True, "profiles": results}
 
+    def save_task_state(self, username, record):
+        try:
+            root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "tasks"
+            root.mkdir(parents=True, exist_ok=True)
+            path = root / f"{re.sub(r'[^A-Za-z0-9._-]', '_', str(username))}.json"
+            current = {}
+            if path.exists():
+                try: current = json.loads(path.read_text(encoding="utf-8"))
+                except Exception: current = {}
+            current[str(record.get("id"))] = record
+            path.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def load_task_state(self, username):
+        try:
+            root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "tasks"
+            path = root / f"{re.sub(r'[^A-Za-z0-9._-]', '_', str(username))}.json"
+            if not path.exists():
+                return {"ok": True, "records": {}}
+            records = json.loads(path.read_text(encoding="utf-8"))
+            return {"ok": True, "records": records if isinstance(records, dict) else {}}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "records": {}}
+
     def recent_profiles(self):
         root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "cache"
         profiles = []
@@ -109,6 +136,19 @@ class Api:
             except Exception:
                 continue
         return profiles
+
+    def remove_recent_profile(self, username):
+        try:
+            clean_username = str(username).lstrip("@")
+            cache_file = self._cache_file(clean_username)
+            if cache_file.exists():
+                cache_file.unlink()
+            task_file = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "tasks" / f"{re.sub(r'[^A-Za-z0-9._-]', '_', clean_username)}.json"
+            if task_file.exists():
+                task_file.unlink()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def _cache_file(self, username):
         root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "cache"
@@ -284,8 +324,28 @@ class Api:
         self._pause_downloads.clear()
         return True
 
-    def download(self, videos, folder, quality, retry_count=3, concurrency=1):
+    def download(self, videos, folder, quality, retry_count=3, concurrency=1, _worker=False):
         import yt_dlp
+
+        concurrency = max(1, min(8, int(concurrency or 1)))
+        if not _worker and concurrency > 1 and len(videos) > 1:
+            self._cancel_downloads.clear()
+            self._pause_downloads.clear()
+            results = []
+            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="TikTokDownload") as pool:
+                futures = {
+                    pool.submit(self.download, [item], folder, quality, retry_count, 1, True): item
+                    for item in videos
+                }
+                for future in as_completed(futures):
+                    item = futures[future]
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        results.append({"ok": 0, "failed": [{"id": item["id"], "error": str(exc)}]})
+            failed = [entry for result in results for entry in result.get("failed", [])]
+            return {"ok": sum(result.get("ok", 0) for result in results), "failed": failed,
+                    "folder": results[0].get("folder", folder) if results else folder}
 
         username_match = re.search(r"/@([^/?]+)", videos[0].get("url", "")) if videos else None
         username = username_match.group(1) if username_match else "unknown"
@@ -304,8 +364,9 @@ class Api:
         }
         fmt = formats.get(quality, "best[format_note!=watermarked]/best")
         ok, failed = 0, []
-        self._cancel_downloads.clear()
-        self._pause_downloads.clear()
+        if not _worker:
+            self._cancel_downloads.clear()
+            self._pause_downloads.clear()
         progress_context = {"id": "", "last_emit": 0.0, "last_percent": -1, "started": time.time()}
         def control_hook(data):
             while self._pause_downloads.is_set() and not self._cancel_downloads.is_set():
@@ -341,9 +402,6 @@ class Api:
                     title = re.sub(r'[<>:"/\\|?*]+', '_', item.get("title") or "图片").strip(" .")[:100]
                     post_folder = target / f"{title}_{stamp}_[{item['id']}]"
                     post_folder.mkdir(parents=True, exist_ok=True)
-                    if any(post_folder.glob("*.jpg")):
-                        self._emit("downloadProgress", {"id": item["id"], "state": "skipped", "folder": str(target)})
-                        continue
                     for photo_index, photo_url in enumerate(urls, 1):
                         if self._cancel_downloads.is_set():
                             raise RuntimeError("用户取消下载")
@@ -363,6 +421,9 @@ class Api:
                         if response is None:
                             raise RuntimeError(f"图片下载失败：{last_photo_error}")
                         output = post_folder / f"{photo_index:02d}.jpg"
+                        if output.exists() and output.stat().st_size > 0:
+                            self._emit("downloadProgress", {"id": item["id"], "state": "progress", "percent": round(photo_index * 100 / len(urls))})
+                            continue
                         output.write_bytes(response.content)
                         self._emit("downloadProgress", {"id": item["id"], "state": "progress", "percent": round(photo_index * 100 / len(urls))})
                     ok += 1
