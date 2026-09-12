@@ -1,0 +1,115 @@
+[CmdletBinding()]
+param(
+    [string]$Python = "python",
+    [switch]$Installer
+)
+
+$ErrorActionPreference = "Stop"
+$projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$appRoot = Join-Path $projectRoot "outputs\TikTokBatchMVP"
+$buildRoot = Join-Path $projectRoot "work\release-build"
+$exePath = Join-Path $appRoot "TikTokBatchMVP.exe"
+$specPath = Join-Path $PSScriptRoot "TikTokBatchMVP.spec"
+
+# Fail before PyInstaller replaces an EXE that is currently being tried.
+$runningApp = Get-Process -Name "TikTokBatchMVP" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $exePath }
+if ($runningApp) {
+    throw "Close the running TikTokBatchMVP trial window, then run this build again."
+}
+
+$requiredFiles = @(
+    (Join-Path $appRoot "web_app.py"),
+    (Join-Path $appRoot "app.py"),
+    (Join-Path $appRoot "session_store.py"),
+    (Join-Path $appRoot "profile_pagination.py"),
+    (Join-Path $appRoot "ui\index.html"),
+    (Join-Path $appRoot "ui\tiktok-logo.png"),
+    $specPath,
+    (Join-Path $PSScriptRoot "frozen_self_test.py")
+)
+foreach ($requiredFile in $requiredFiles) {
+    if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+        throw "Missing build source: $requiredFile"
+    }
+}
+
+# Use the same interpreter for the dependency check and the actual bundle.
+$dependencyCheck = @'
+import importlib
+import importlib.metadata
+
+requirements = {
+    "PyInstaller": "pyinstaller",
+    "webview": "pywebview",
+    "yt_dlp": "yt-dlp",
+    "curl_cffi": "curl_cffi",
+    "playwright.sync_api": "playwright",
+    "docx": "python-docx",
+    "requests": "requests",
+    "PIL": "Pillow",
+}
+missing = []
+for module, distribution in requirements.items():
+    try:
+        importlib.import_module(module)
+        print(f"{distribution}=={importlib.metadata.version(distribution)}")
+    except Exception as exc:
+        missing.append(f"{distribution}: {exc}")
+if missing:
+    raise SystemExit("Build dependencies unavailable:\n" + "\n".join(missing))
+'@
+& $Python -c $dependencyCheck
+if ($LASTEXITCODE -ne 0) {
+    throw "The selected Python environment is missing build dependencies."
+}
+
+& $Python -m PyInstaller --noconfirm --clean --distpath $appRoot --workpath $buildRoot $specPath
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
+    throw "PyInstaller failed."
+}
+
+$artifact = Get-Item -LiteralPath $exePath
+$digest = Get-FileHash -LiteralPath $exePath -Algorithm SHA256
+Write-Host "Built: $($artifact.FullName)"
+Write-Host "Bytes: $($artifact.Length)"
+Write-Host "SHA256: $($digest.Hash)"
+
+# Exercise the bundled modules, driver, templates and UI assets without opening
+# the application, loading user preferences or making any network requests.
+$reportPath = Join-Path $buildRoot "self-test.json"
+$testProcess = Start-Process -FilePath $exePath -ArgumentList @("--self-test", "`"$reportPath`"") -WindowStyle Hidden -PassThru
+if (-not $testProcess.WaitForExit(60000)) {
+    Stop-Process -Id $testProcess.Id -ErrorAction SilentlyContinue
+    throw "Bundled dependency self-test timed out after 60 seconds."
+}
+$testProcess.Refresh()
+if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+    throw "Bundled dependency self-test produced no report (exit $($testProcess.ExitCode))."
+}
+$report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+if (-not $report.ok -or $testProcess.ExitCode -ne 0) {
+    $failedChecks = $report.checks | Where-Object { -not $_.ok } | ForEach-Object { "$($_.name): $($_.error)" }
+    throw "Bundled dependency self-test failed: $($failedChecks -join '; '). Report: $reportPath"
+}
+Write-Host "Bundled self-test passed: $reportPath"
+
+if ($Installer) {
+    $iscc = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($iscc) {
+        $isccPath = $iscc.Source
+    } else {
+        $isccPath = @(
+            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
+            (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    }
+    if (-not $isccPath) {
+        throw "EXE built successfully. Install Inno Setup 6 to build the installer."
+    }
+    & $isccPath (Join-Path $PSScriptRoot "TikTokBatchMVP.iss")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup failed; the portable EXE is available at $exePath."
+    }
+}

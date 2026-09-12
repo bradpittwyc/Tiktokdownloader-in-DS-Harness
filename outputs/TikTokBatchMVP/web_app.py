@@ -9,6 +9,8 @@ import time
 import msvcrt
 import shutil
 import base64
+import subprocess
+import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from yt_dlp.networking.impersonate import ImpersonateTarget
 from playwright.sync_api import sync_playwright
 
 from app import clean_profile_url, find_chrome
+from session_store import SessionStore, tiktok_cookies, has_session, chrome_app_bound
 
 
 BASE = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).parent
@@ -39,6 +42,24 @@ class Api:
         self._cancel_downloads = threading.Event()
         self._cookie_file = ""
         self._cookie_browser = ""
+        self._cookie_error = ""
+        self._cookie_code = ""
+        self._cookie_snapshot = []
+        self._cookie_loaded = False
+        self._cookie_lock = threading.RLock()
+        self._login_lock = threading.Lock()
+        self._profile_lock = threading.Lock()
+        self._verification_username = ""
+        self._verification_status = {"busy": False}
+        self._verification_started = threading.Event()
+        self._collection_warning = ""
+        self._collection_complete = False
+        self._collection_needs_verification = False
+        self._login_cancel = threading.Event()
+        self._login_busy = False
+        self._login_process = None
+        self._session_store = SessionStore()
+        self._session_user_agent = ""
         self._filename_template = self._load_filename_template()
         self._learning = self._load_learning_options()
 
@@ -249,12 +270,205 @@ class Api:
             threading.Thread(target=self._generate_learning_document, args=(item, target, subtitle_paths), daemon=True).start()
 
     def set_cookie_options(self, cookie_file="", browser=""):
-        allowed = {"", "chrome", "edge"}
-        self._cookie_file = str(cookie_file or "").strip()
-        self._cookie_browser = str(browser or "").lower().strip()
-        if self._cookie_browser not in allowed:
-            self._cookie_browser = ""
+        with self._cookie_lock:
+            self._cookie_file = str(cookie_file or "").strip()
+            self._cookie_browser = str(browser or "").lower().strip()
+            if self._cookie_browser not in {"", "chrome", "edge", "saved"}:
+                self._cookie_browser = ""
+            self._cookie_loaded = False
+            self._session_user_agent = ""
+            self._playwright_cookies()
+            return self.get_cookie_status()
+
+    def get_cookie_status(self):
+        with self._cookie_lock:
+            cookies = tiktok_cookies(self._cookie_snapshot)
+            requested = bool(self._cookie_file or self._cookie_browser)
+            return {"ok": not requested or (has_session(cookies) and not self._cookie_error),
+                    "source": "cookies.txt" if self._cookie_file else self._cookie_source_label(),
+                    "browser": self._cookie_browser, "count": len(cookies),
+                    "hasSession": has_session(cookies), "error": self._cookie_error,
+                    "code": self._cookie_code, "busy": self._login_busy}
+
+    def _cookie_source_label(self):
+        if self._cookie_browser == "chrome":
+            return "Chrome Cookie"
+        if self._cookie_browser == "saved":
+            return "软件保存的 TikTok 登录态"
+        return self._cookie_browser or "未使用"
+
+    def login_tiktok(self):
+        if not self._login_lock.acquire(blocking=False):
+            return {"ok": True, "busy": True}
+        if not self._profile_lock.acquire(blocking=False):
+            self._login_lock.release()
+            return {"ok": False, "busy": False, "error": "正在读取博主，请等本次读取结束后更新登录态"}
+        self._login_busy = True
+        self._login_cancel.clear()
+        threading.Thread(target=self._login_tiktok_worker, daemon=True).start()
+        return {"ok": True, "busy": True}
+
+    def verify_profile(self, username):
+        username = str(username or "").lstrip("@")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", username) or username != self._verification_username:
+            return {"ok": False, "error": "请从当前抓取结果中的验证按钮打开"}
+        if not self._login_lock.acquire(blocking=False):
+            return {"ok": False, "error": "登录或验证窗口已经打开，请先完成或取消"}
+        if not self._profile_lock.acquire(blocking=False):
+            self._login_lock.release()
+            return {"ok": False, "error": "正在读取主页，请稍候重试"}
+        self._login_busy = True
+        self._login_cancel.clear()
+        self._verification_started.clear()
+        self._verification_status = {"busy": True, "username": username,
+                                     "message": "请完成验证并保持窗口打开，软件会在同一窗口继续抓取"}
+        try:
+            login_profile = self._login_profile_dir()
+            login_profile.mkdir(parents=True, exist_ok=True)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("127.0.0.1", 0))
+                debug_port = sock.getsockname()[1]
+            command = [find_chrome(), f"--user-data-dir={login_profile}", "--profile-directory=Default",
+                       f"--remote-debugging-port={debug_port}", "--remote-debugging-address=127.0.0.1",
+                       "--no-first-run", "--no-default-browser-check", "--new-window",
+                       f"https://www.tiktok.com/@{username}"]
+            self._login_process = subprocess.Popen(command)
+        except Exception as exc:
+            self._login_busy = False
+            self._profile_lock.release()
+            self._login_lock.release()
+            return {"ok": False, "busy": False, "error": f"无法启动 Chrome：{exc}"}
+        threading.Thread(target=self._verify_profile_worker, args=(username, debug_port), daemon=True).start()
+        if not self._verification_started.wait(20):
+            self._login_cancel.set()
+            if self._login_process and self._login_process.poll() is None:
+                self._login_process.terminate()
+            return {"ok": False, "busy": False, "error": "20 秒内未能启动 Chrome 验证窗口，请重试"}
+        state = self.get_verification_status()
+        if state.get("stage") == "failed":
+            return {"ok": False, "busy": False, "error": state.get("error") or "Chrome 验证窗口启动失败"}
+        return {"ok": True, "busy": True, "stage": state.get("stage")}
+
+    def get_verification_status(self):
+        return dict(self._verification_status)
+
+    def _verify_profile_worker(self, username, debug_port):
+        """Keep the challenged page visible and continue collecting in that session."""
+        error = ""
+        result = None
+        try:
+            # Do not call evaluate_js here. This worker can start before the
+            # verify_profile bridge call has returned; a synchronous callback
+            # at that point deadlocks pywebview and Chrome is never launched.
+            self._verification_status.update(stage="starting", message="正在打开 TikTok 验证窗口…")
+            videos = self._collect_videos(f"https://www.tiktok.com/@{username}", interactive=True,
+                                          lock_held=True, cdp_url=f"http://127.0.0.1:{debug_port}")
+            result = self._store_profile_archive(username, videos, self._collection_complete)
+        except Exception as exc:
+            error = str(exc)
+        finally:
+            self._login_busy = False
+            self._login_process = None
+            self._profile_lock.release()
+            self._login_lock.release()
+            self._verification_status = {"busy": False, "username": username,
+                                         "ready": bool(result), "error": error, "result": result,
+                                         "stage": "finished" if result else "failed"}
+            self._verification_started.set()
+            self._emit("cookieStatus", self.get_cookie_status())
+            self._emit("verificationStatus", self._verification_status)
+
+    def cancel_tiktok_login(self):
+        self._login_cancel.set()
+        process = self._login_process
+        if process and process.poll() is None:
+            try:
+                process.terminate()
+            except Exception:
+                pass
         return {"ok": True}
+
+    def _login_tiktok_worker(self, verification_username=""):
+        error = ""
+        saved = False
+        login_profile = self._login_profile_dir()
+        target_url = f"https://www.tiktok.com/@{verification_username}" if verification_username else "https://www.tiktok.com/login"
+        try:
+            login_profile.mkdir(parents=True, exist_ok=True)
+            command = [find_chrome(), f"--user-data-dir={login_profile}", "--profile-directory=Default",
+                       "--no-first-run", "--no-default-browser-check", "--new-window",
+                       "--disable-background-mode", target_url]
+            # Google blocks sign-in in Playwright-controlled Chrome. Login is
+            # performed in ordinary Chrome; once it closes, Chrome is reopened
+            # headlessly with the same app-owned profile to export TikTok cookies.
+            self._login_process = subprocess.Popen(command)
+            self._emit("cookieStatus", {**self.get_cookie_status(), "busy": True,
+                                       "error": "请在打开的博主主页手动完成验证，然后关闭该窗口" if verification_username else "请在普通 Chrome 中登录 TikTok；完成后关闭该窗口，软件会自动保存"})
+            deadline = time.monotonic() + 900
+            while time.monotonic() < deadline and not self._login_cancel.is_set():
+                if self._login_process.poll() is not None:
+                    break
+                time.sleep(.5)
+            if self._login_cancel.is_set():
+                error = "已取消登录，原登录设置保持不变"
+            elif self._login_process.poll() is None:
+                error = "等待登录超时，请关闭登录窗口后重试"
+            else:
+                time.sleep(1)
+                with sync_playwright() as playwright:
+                    context = playwright.chromium.launch_persistent_context(
+                        str(login_profile), executable_path=find_chrome(), headless=True)
+                    try:
+                        page = context.pages[0] if context.pages else context.new_page()
+                        cookies = tiktok_cookies(context.cookies())
+                        if not has_session(cookies):
+                            error = "没有检测到 TikTok 登录状态，请确认登录成功后再关闭窗口"
+                        else:
+                            user_agent = page.evaluate("navigator.userAgent")
+                            with self._cookie_lock:
+                                self._session_store.save(cookies, user_agent)
+                                self._cookie_file = ""
+                                self._cookie_browser = "saved"
+                                self._cookie_snapshot = cookies
+                                self._cookie_loaded = True
+                                self._session_user_agent = user_agent
+                                self._cookie_error = self._cookie_code = ""
+                            saved = True
+                    finally:
+                        context.close()
+        except Exception:
+            error = "无法保存 TikTok 登录状态，请关闭登录窗口后重试；原设置保持不变"
+        finally:
+            self._login_process = None
+            self._login_busy = False
+            self._profile_lock.release()
+            self._login_lock.release()
+            status = self.get_cookie_status()
+            status.update(saved=saved)
+            if error:
+                status.update(ok=False, error=error)
+            self._emit("cookieStatus", status)
+            if verification_username:
+                self._emit("verificationStatus", {"username": verification_username, "ready": saved,
+                                                   "error": error})
+
+    def _chrome_profiles(self):
+        root = Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "User Data"
+        try:
+            ordered = []
+            state = json.loads((root / "Local State").read_text(encoding="utf-8"))
+            for name in state.get("profile", {}).get("last_active_profiles", []):
+                if (root / name / "Network" / "Cookies").exists():
+                    ordered.append(name)
+            for folder in root.iterdir():
+                if not folder.is_dir() or not (folder.name == "Default" or folder.name.startswith("Profile ")):
+                    continue
+                cookie_db = folder / "Network" / "Cookies"
+                if cookie_db.exists() and folder.name not in ordered:
+                    ordered.append(folder.name)
+            return ordered
+        except Exception:
+            return []
 
     def choose_cookie_file(self):
         result = self._window.create_file_dialog(
@@ -265,23 +479,105 @@ class Api:
         return result[0] if result else None
 
     def _playwright_cookies(self):
-        if not self._cookie_file or not Path(self._cookie_file).is_file():
-            return []
-        jar = http.cookiejar.MozillaCookieJar(self._cookie_file)
-        jar.load(ignore_discard=True, ignore_expires=True)
-        return [
+        with self._cookie_lock:
+            if self._cookie_loaded:
+                self._cookie_snapshot = tiktok_cookies(self._cookie_snapshot)
+                if (self._cookie_file or self._cookie_browser) and not has_session(self._cookie_snapshot) and not self._cookie_error:
+                    self._cookie_error = "登录 Cookie 已过期或缺失，请更新 TikTok 登录态"
+                    self._cookie_code = "no_session"
+                return list(self._cookie_snapshot)
+            self._cookie_error = self._cookie_code = ""
+            self._cookie_snapshot = []
+            self._cookie_loaded = True
+            try:
+                if self._cookie_file:
+                    if not Path(self._cookie_file).is_file():
+                        raise RuntimeError("找不到 cookies.txt 文件")
+                    jar = http.cookiejar.MozillaCookieJar(self._cookie_file)
+                    jar.load(ignore_discard=True, ignore_expires=False)
+                    cookies = self._cookies_from_jar(jar)
+                elif self._cookie_browser == "saved":
+                    payload = self._session_store.load()
+                    cookies = payload["cookies"]
+                    self._session_user_agent = payload.get("user_agent", "")
+                elif self._cookie_browser:
+                    from yt_dlp.cookies import extract_cookies_from_browser
+                    profiles = self._chrome_profiles() if self._cookie_browser == "chrome" else [None]
+                    cookies = []
+                    blocked_encryption = False
+                    class QuietLogger:
+                        def debug(self, *args, **kwargs): pass
+                        def info(self, *args, **kwargs): pass
+                        def warning(self, *args, **kwargs): pass
+                        def error(self, *args, **kwargs): pass
+                    for profile in profiles:
+                        root = Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data"
+                        if profile and chrome_app_bound(root / profile):
+                            blocked_encryption = True
+                            continue
+                        try:
+                            jar = extract_cookies_from_browser(self._cookie_browser, profile=profile, logger=QuietLogger())
+                            candidate = self._cookies_from_jar(jar)
+                            if has_session(candidate):
+                                cookies = candidate
+                                break
+                        except Exception:
+                            continue
+                    if not cookies:
+                        self._cookie_code = "app_bound" if blocked_encryption else "browser_unavailable"
+                        message = ("Chrome 的 TikTok 登录 Cookie 使用应用绑定加密，无法直接导入；关闭 Chrome 也不能解决。"
+                                   if blocked_encryption else "无法读取浏览器的 TikTok 登录 Cookie。")
+                        raise RuntimeError(message + "请点击“登录 TikTok”保存软件登录态，或导入导出的 cookies.txt。")
+                else:
+                    return []
+                self._cookie_snapshot = tiktok_cookies(cookies)
+                if not has_session(self._cookie_snapshot):
+                    self._cookie_code = "no_session"
+                    raise RuntimeError("未检测到有效的 TikTok 登录 Cookie，请点击“登录 TikTok”或重新导入 cookies.txt")
+            except RuntimeError as exc:
+                self._cookie_error = str(exc)
+            except Exception:
+                # Never expose cookie contents or decoder input in an exception message.
+                self._cookie_error = "登录态文件无法读取或格式不正确，请重新导入或登录 TikTok"
+                self._cookie_code = "invalid_cookie_file"
+            return list(self._cookie_snapshot)
+
+    @staticmethod
+    def _cookies_from_jar(jar):
+        return tiktok_cookies([
             {"name": c.name, "value": c.value, "domain": c.domain,
              "path": c.path or "/", "secure": bool(c.secure),
              "expires": int(c.expires) if c.expires else -1}
-            for c in jar if "tiktok.com" in c.domain
-        ]
+            for c in jar
+        ])
+
+    def _require_cookies(self):
+        cookies = self._playwright_cookies()
+        if (self._cookie_file or self._cookie_browser) and (self._cookie_error or not has_session(cookies)):
+            raise RuntimeError(self._cookie_error or "TikTok 登录态失效，请更新登录态")
+        return cookies
 
     def _apply_cookie_options(self, options):
-        if self._cookie_file and Path(self._cookie_file).is_file():
-            options["cookiefile"] = self._cookie_file
-        elif self._cookie_browser:
-            options["cookiesfrombrowser"] = (self._cookie_browser,)
+        # All downloaders use the same in-memory TikTok-only snapshot as Playwright.
+        # Do not let yt-dlp independently select another browser profile.
+        self._require_cookies()
+        options.pop("cookiefile", None)
+        options.pop("cookiesfrombrowser", None)
         return options
+
+    def _youtube_dl(self, options):
+        cookies = self._require_cookies()
+        downloader = yt_dlp.YoutubeDL(options)
+        for c in cookies:
+            downloader.cookiejar.set_cookie(http.cookiejar.Cookie(
+                version=0, name=c["name"], value=c["value"], port=None, port_specified=False,
+                domain=c["domain"], domain_specified=True, domain_initial_dot=c["domain"].startswith("."),
+                path=c.get("path") or "/", path_specified=True, secure=c.get("secure", False),
+                expires=int(c["expires"]) if c.get("expires", -1) > 0 else None,
+                discard=c.get("expires", -1) <= 0, comment=None, comment_url=None,
+                rest={"HttpOnly": None} if c.get("httpOnly") else {}, rfc2109=False,
+            ))
+        return downloader
 
     def _files_for_item(self, folder, item_id, item=None):
         files = [path for path in Path(folder).iterdir() if path.is_file() and f"_[{item_id}]" in path.name]
@@ -305,6 +601,9 @@ class Api:
 
     def recognize(self, raw_url):
         try:
+            self._collection_complete = False
+            self._collection_warning = ""
+            self._collection_needs_verification = False
             url = clean_profile_url(raw_url)
             username = re.search(r"/@([^/?]+)", url).group(1)
             self._profile_avatar = ""
@@ -321,9 +620,14 @@ class Api:
                     pass
             try:
                 videos = self._collect_videos(url)
-                cache_file.parent.mkdir(parents=True, exist_ok=True)
-                cache_file.write_text(json.dumps({"avatar": self._profile_avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
+                archived = self._store_profile_archive(username, videos, self._collection_complete)
+                videos = archived["videos"]
             except Exception as live_error:
+                # A requested login source must never degrade to an anonymous or
+                # cached result that looks like a successful full-profile read.
+                if (self._cookie_file or self._cookie_browser) and self._cookie_error:
+                    raise live_error
+                self._collection_warning = self._collection_warning or "本次读取失败，已显示本地缓存；尚未抓完。"
                 if not cache_file.exists():
                     raise live_error
                 cached = json.loads(cache_file.read_text(encoding="utf-8"))
@@ -345,7 +649,9 @@ class Api:
                                        "cover": extra[0] if extra else "",
                                        "views": extra[1] if len(extra) > 1 else None,
                                        "type": extra[2] if len(extra) > 2 else "video"})
-            return {"ok": True, "username": username, "avatar": self._profile_avatar, "profileStats": self._profile_stats, "videos": normalized}
+            return {"ok": True, "complete": self._collection_complete, "warning": self._collection_warning,
+                    "needsVerification": self._collection_needs_verification,
+                    "username": username, "avatar": self._profile_avatar, "profileStats": self._profile_stats, "videos": normalized}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -428,6 +734,7 @@ class Api:
                     # one tab. A fresh context makes the avatar belong to this ID.
                     browser, context = self._browser_context(playwright)
                     page = context.pages[0] if context.pages else context.new_page()
+
                     page.goto(f"https://www.tiktok.com/@{username}?lang=en", wait_until="domcontentloaded", timeout=45000)
                     # TikTok initially paints stale SPA content; wait for the
                     # profile image to settle before caching it.
@@ -475,64 +782,293 @@ class Api:
         root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "cache"
         return root / f"{re.sub(r'[^A-Za-z0-9._-]', '_', username)}.json"
 
-    def _browser_context(self, playwright):
-        browser = playwright.chromium.launch(executable_path=find_chrome(), headless=True, args=["--disable-blink-features=AutomationControlled"])
-        context = browser.new_context(viewport={"width": 1280, "height": 900})
-        cookies = self._playwright_cookies()
-        if cookies:
-            context.add_cookies(cookies)
-        return browser, context
+    def _load_profile_archive(self, username):
+        try:
+            value = json.loads(self._cache_file(username).read_text(encoding="utf-8"))
+            if isinstance(value, list):
+                value = {"videos": value}
+            return value if isinstance(value, dict) else {}
+        except Exception:
+            return {}
 
-    def _collect_videos(self, url):
+    def _store_profile_archive(self, username, rows, complete=False):
+        """Merge every observed batch atomically so interrupted runs lose no history."""
+        path = self._cache_file(username)
+        old = self._load_profile_archive(username)
+        merged = {str(row.get("id")): row for row in old.get("videos", [])
+                  if isinstance(row, dict) and row.get("id")}
+        for row in rows:
+            if isinstance(row, dict) and row.get("id"):
+                ident = str(row["id"])
+                merged[ident] = {**merged.get(ident, {}), **row}
+        videos = sorted(merged.values(), key=lambda row: int(row.get("id", 0) or 0), reverse=True)
+        history_complete = bool(old.get("history_complete") or complete)
+        payload = {
+            "schema": 2, "avatar": self._profile_avatar or old.get("avatar", ""),
+            "avatar_owner": username, "profile_stats": self._profile_stats or old.get("profile_stats", {}),
+            "videos": videos, "history_complete": history_complete,
+            "last_sync": int(time.time()), "count": len(videos),
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, path)
+        self._emit("archiveUpdate", {"username": username, "videos": videos,
+                                     "complete": history_complete, "count": len(videos)})
+        return {"ok": True, "complete": history_complete, "warning": self._collection_warning,
+                "needsVerification": self._collection_needs_verification, "username": username,
+                "avatar": payload["avatar"], "profileStats": payload["profile_stats"], "videos": videos}
+
+    def _login_profile_dir(self):
+        return self._session_store.root / "login-browser"
+
+    def _browser_context(self, playwright, reuse_login=False, headless=True):
+        cookies = self._require_cookies()
+        if reuse_login and self._cookie_browser == "saved" and not self._cookie_file:
+            # Use the exact Chrome profile where the user logged in / verified.
+            # Copying cookies into a fresh context discards site storage and cache.
+            context = playwright.chromium.launch_persistent_context(
+                str(self._login_profile_dir()), executable_path=find_chrome(), headless=headless,
+                viewport={"width": 1280, "height": 900})
+            try:
+                existing = tiktok_cookies(context.cookies())
+                if not has_session(existing):
+                    # Session cookies may be dropped by Chrome on normal shutdown.
+                    # Restore only missing cookies; preserve newer verification data.
+                    keys = {(c["domain"], c["path"], c["name"]) for c in existing}
+                    missing = [c for c in cookies if (c["domain"], c["path"], c["name"]) not in keys]
+                    if missing:
+                        context.add_cookies(missing)
+                return None, context
+            except Exception:
+                context.close()
+                raise
+        browser = playwright.chromium.launch(executable_path=find_chrome(), headless=True, args=["--disable-blink-features=AutomationControlled", "--disable-features=AutomationControlled"])
+        try:
+            # Match the saved login browser; avoid a stale hard-coded Chrome version.
+            user_agent = self._session_user_agent or f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{browser.version} Safari/537.36"
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 900}, locale="en-US",
+                user_agent=user_agent,
+            )
+            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            if cookies:
+                context.add_cookies(cookies)
+            return browser, context
+        except Exception:
+            browser.close()
+            raise
+
+    def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None):
+        from profile_pagination import ProfilePagination
+
+        # Reject an invalid requested login source before Playwright starts.
+        self._require_cookies()
+        self._collection_warning = ""
+        self._collection_complete = False
+        self._collection_needs_verification = False
         username_match = re.search(r"/@([^/?]+)", url)
         username = username_match.group(1) if username_match else ""
-        last_error = ""
-        for attempt in range(1, 4):
-            found, browser, context = {}, None, None
+        archive = self._load_profile_archive(username)
+        known_ids = {str(row.get("id")) for row in archive.get("videos", []) if isinstance(row, dict)}
+        incremental = bool(archive.get("history_complete"))
+        found, pagination = {}, ProfilePagination(username)
+        browser = context = None
+
+        def merge_api_items():
+            for ident, item in pagination.items.items():
+                kind = "image" if item.get("imagePost") else "video"
+                stats, video = item.get("stats") or {}, item.get("video") or {}
+                found[ident] = {
+                    "id": ident, "url": f"https://www.tiktok.com/@{username}/{'photo' if kind == 'image' else 'video'}/{ident}",
+                    "title": item.get("desc") or f"作品 {ident}", "cover": video.get("cover", ""),
+                    "views": stats.get("playCount"), "likes": stats.get("diggCount"),
+                    "comments": stats.get("commentCount"), "shares": stats.get("shareCount"),
+                    "duration": video.get("duration"), "type": kind,
+                }
+                if item.get("createTime"):
+                    try:
+                        found[ident]["upload_date"] = time.strftime("%Y%m%d", time.localtime(int(item["createTime"])))
+                    except (ValueError, TypeError, OverflowError):
+                        pass
+            if found:
+                self._store_profile_archive(username, list(found.values()), False)
+
+        def collect_response(response):
+            if not pagination.request_parts(response.url):
+                return
             try:
-                self._emit("setStatus", f"后台读取主页（第 {attempt}/3 次尝试）…")
-                with sync_playwright() as playwright:
-                    browser, context = self._browser_context(playwright)
+                pagination.observe(response.url, response.json(), response.status)
+            except Exception:
+                if pagination.belongs_to_target(response.url):
+                    pagination.observe(response.url, None, response.status)
+
+        acquired_here = False
+        if not lock_held:
+            if not self._profile_lock.acquire(blocking=False):
+                raise RuntimeError("登录或验证窗口正在使用浏览器，请完成后关闭该窗口再继续")
+            acquired_here = True
+        try:
+            if interactive:
+                self._verification_status.update(stage="starting", message="正在启动 Chrome…")
+            else:
+                self._emit("setStatus", "正在后台读取主页…")
+            with sync_playwright() as playwright:
+                try:
+                    if cdp_url:
+                        deadline = time.monotonic() + 18
+                        last_error = None
+                        while time.monotonic() < deadline and not self._login_cancel.is_set():
+                            try:
+                                browser = playwright.chromium.connect_over_cdp(cdp_url, timeout=3000)
+                                context = browser.contexts[0] if browser.contexts else None
+                                if context:
+                                    break
+                            except Exception as exc:
+                                last_error = exc
+                                time.sleep(.35)
+                        if not context:
+                            raise RuntimeError(f"Chrome 已启动，但软件无法连接验证窗口：{last_error or '连接超时'}")
+                    else:
+                        browser, context = self._browser_context(playwright, reuse_login=True, headless=not interactive)
+                    if interactive:
+                        self._verification_status.update(stage="opened", message="验证窗口已打开，请完成验证并保持窗口打开")
+                        self._verification_started.set()
                     page = context.pages[0] if context.pages else context.new_page()
+                    page.on("response", collect_response)
                     page.goto(url + "?lang=en", wait_until="domcontentloaded", timeout=60000)
                     try:
                         page.wait_for_selector('[data-e2e="followers-count"]', timeout=12000)
                     except Exception:
                         page.wait_for_timeout(1500)
-                    profile_js = """()=>{const img=document.querySelector('[data-e2e=\"user-avatar\"] img');const text=e=>{const n=document.querySelector(e);return n?n.textContent.trim():null};return {avatar:img?(img.currentSrc||img.src||''):'',following:text('[data-e2e=\"following-count\"]'),followers:text('[data-e2e=\"followers-count\"]'),likes:text('[data-e2e=\"likes-count\"]')}}"""
-                    profile_data = page.evaluate(profile_js) or {}
+                    profile_data = page.evaluate("""()=>{const img=document.querySelector('[data-e2e="user-avatar"] img');const text=e=>{const n=document.querySelector(e);return n?n.textContent.trim():null};return {avatar:img?(img.currentSrc||img.src||''):'',following:text('[data-e2e="following-count"]'),followers:text('[data-e2e="followers-count"]'),likes:text('[data-e2e="likes-count"]')}}""") or {}
                     self._profile_avatar = profile_data.pop("avatar", "") or ""
                     self._profile_stats = profile_data
                     self._emit("profileUpdate", {"username": username, "avatar": self._profile_avatar, "profileStats": self._profile_stats})
-                    unchanged, previous = 0, -1
-                    for _ in range(120):
-                        rows = page.locator('a[href*="/video/"], a[href*="/photo/"]').evaluate_all("""els=>els.map(e=>{const c=e.closest('[data-e2e=\"user-post-item\"]')||e.parentElement;const i=e.querySelector('img')||(c&&c.querySelector('img'));const v=c&&c.querySelector('[data-e2e=\"video-views\"]');return {url:e.href.split('?')[0],title:e.getAttribute('aria-label')||(i&&i.alt)||e.innerText||'',cover:i?(i.currentSrc||i.src):'',views:v?v.textContent.trim():null}})""")
+                    last_growth, previous, previous_revision = time.monotonic(), -1, -1
+                    retries, last_continuation = {}, 0.0
+                    while True:
+                        rows = page.locator('a[href*="/video/"], a[href*="/photo/"]').evaluate_all("""els=>els.map(e=>{const c=e.closest('[data-e2e="user-post-item"]')||e.parentElement;const i=e.querySelector('img')||(c&&c.querySelector('img'));const v=c&&c.querySelector('[data-e2e="video-views"]');return {url:e.href.split('?')[0],title:e.getAttribute('aria-label')||(i&&i.alt)||e.innerText||'',cover:i?(i.currentSrc||i.src):'',views:v?v.textContent.trim():null}})""")
                         for row in rows:
                             match = re.search(r"/(?:video|photo)/(\d+)", row.get("url", ""))
-                            if match:
+                            if match and f"/@{username.lower()}/" in row.get("url", "").lower() and match.group(1) not in found:
                                 title = " ".join((row.get("title") or "").split()) or f"作品 {match.group(1)}"
                                 found[match.group(1)] = {"id": match.group(1), "url": row["url"], "title": title[:160], "cover": row.get("cover") or "", "views": row.get("views"), "type": "image" if "/photo/" in row.get("url", "") else "video"}
-                        self._emit("setStatus", f"已读取 {len(found)} 条，继续加载…")
-                        unchanged = unchanged + 1 if found and len(found) == previous else 0
-                        previous = len(found)
-                        if unchanged >= 10:
+                        merge_api_items()
+                        challenge = False
+                        for frame in page.frames:
+                            try:
+                                text = frame.locator('body').inner_text(timeout=800).lower()
+                                if any(message in text for message in ("drag the slider to fit the puzzle", "verify to continue", "拖动滑块", "完成下方验证")):
+                                    challenge = True
+                                    break
+                            except Exception:
+                                continue
+                        if challenge:
+                            if interactive:
+                                self._emit("setStatus", "请在打开的 TikTok 窗口完成安全验证…")
+                                deadline = time.monotonic() + 900
+                                while challenge and time.monotonic() < deadline and not self._login_cancel.is_set():
+                                    if page.is_closed():
+                                        raise RuntimeError("验证窗口已关闭。请重新打开验证窗口，完成验证后保持窗口打开，软件会自动继续抓取。")
+                                    page.wait_for_timeout(1000)
+                                    challenge = False
+                                    for frame in page.frames:
+                                        try:
+                                            text = frame.locator('body').inner_text(timeout=800).lower()
+                                            if any(message in text for message in ("drag the slider to fit the puzzle", "verify to continue", "拖动滑块", "完成下方验证")):
+                                                challenge = True
+                                                break
+                                        except Exception:
+                                            continue
+                                if self._login_cancel.is_set():
+                                    raise RuntimeError("已取消验证")
+                                if challenge:
+                                    raise RuntimeError("等待 TikTok 验证超时")
+                                last_growth = time.monotonic()
+                                continue
+                            self._collection_needs_verification = True
+                            self._verification_username = username
+                            self._collection_warning = "TikTok 要求安全验证，已有作品已保留。点击“打开验证窗口”，在博主主页完成验证并关闭窗口后自动继续。"
                             break
-                        page.mouse.wheel(0, 5000)
-                        page.wait_for_timeout(800)
-                    if found:
-                        return list(found.values())
-                    last_error = "TikTok 页面没有返回公开作品"
-            except Exception as exc:
-                last_error = str(exc)
-            finally:
-                if context:
-                    try: context.close()
-                    except Exception: pass
-                if browser:
-                    try: browser.close()
-                    except Exception: pass
-            time.sleep(2)
-        raise RuntimeError(f"后台读取连续失败：{last_error}")
+                        if pagination.refused:
+                            self._collection_warning = pagination.error + "；已保留已有作品，尚未抓完。"
+                            break
+                        if pagination.complete:
+                            self._collection_complete = True
+                            break
+                        # Once a complete archive exists, the first overlap proves
+                        # we reached previously saved history; future syncs only
+                        # need to collect the newer prefix.
+                        if incremental and known_ids.intersection(found):
+                            self._collection_complete = True
+                            self._collection_warning = f"增量同步完成，本次发现 {len(set(found) - known_ids)} 条新作品。"
+                            break
+                        now = time.monotonic()
+                        if len(found) != previous or pagination.revision != previous_revision:
+                            last_growth = now
+                        previous, previous_revision = len(found), pagination.revision
+                        stalled = now - last_growth
+                        if pagination.error_at is not None and now - pagination.error_at >= 12:
+                            self._collection_warning = pagination.error + "；已保留已有作品，尚未抓完。"
+                            break
+                        if stalled >= 45:
+                            self._collection_warning = "分页连续 45 秒没有前进，已保留已有作品；尚未抓完，请稍后重试。"
+                            break
+                        self._emit("setStatus", f"已读取 {len(found)} 条，{'正在恢复下一页…' if stalled >= 6 else '继续读取…'}")
+                        # Reuse the original page and its login session. Continue
+                        # only an observed, target-scoped API cursor; never reset
+                        # to a new anonymous session after a stall.
+                        continuation = pagination.continuation_url() if stalled >= 6 else None
+                        if continuation and now - last_continuation >= 4:
+                            cursor = pagination.next_cursor()
+                            if retries.get(cursor, 0) >= 3:
+                                self._collection_warning = "同一分页位置重试 3 次仍未前进，已保留已有作品；尚未抓完。"
+                                break
+                            retries[cursor] = retries.get(cursor, 0) + 1
+                            last_continuation = now
+                            try:
+                                result = page.evaluate("""async url=>{const c=new AbortController();const timer=setTimeout(()=>c.abort(),20000);try{const r=await fetch(url,{credentials:'include',signal:c.signal});let data=null;try{data=await r.json()}catch{}return {status:r.status,data}}finally{clearTimeout(timer)}}""", continuation)
+                                pagination.observe(continuation, result.get("data"), result.get("status", 0))
+                            except Exception:
+                                pagination.fail("下一页网络请求失败")
+                            continue
+                        # TikTok sometimes scrolls a nested content panel rather
+                        # than window. Find the actual scroll parent of a card.
+                        page.evaluate("""({username,back})=>{const cards=[...document.querySelectorAll('a[href*="/video/"],a[href*="/photo/"]')].filter(e=>e.href.toLowerCase().includes('/@'+username.toLowerCase()+'/'));let node=cards.at(-1);let scroller=null;while(node){const style=getComputedStyle(node);if(node.scrollHeight>node.clientHeight+80&&/(auto|scroll)/.test(style.overflowY)){scroller=node;break}node=node.parentElement}scroller=scroller||document.scrollingElement;if(scroller){if(back)scroller.scrollTop=Math.max(0,scroller.scrollTop-600);else scroller.scrollTop=scroller.scrollHeight}}""", {"username": username, "back": stalled >= 3})
+                        if stalled >= 3:
+                            page.wait_for_timeout(300)
+                        page.mouse.wheel(0, 2500)
+                        page.wait_for_timeout(1200)
+                finally:
+                    if context:
+                        if self._cookie_browser == "saved" and not self._cookie_file:
+                            try:
+                                fresh_cookies = tiktok_cookies(context.cookies())
+                                if has_session(fresh_cookies):
+                                    with self._cookie_lock:
+                                        self._session_store.save(fresh_cookies, self._session_user_agent)
+                                        self._cookie_snapshot = fresh_cookies
+                            except Exception:
+                                pass
+                        try: context.close()
+                        except Exception: pass
+                    if browser:
+                        try: browser.close()
+                        except Exception: pass
+        except Exception:
+            merge_api_items()
+            if interactive:
+                raise
+            if not found:
+                raise
+            self._collection_warning = "读取连接中断，已保留已有作品；尚未抓完。"
+        finally:
+            if acquired_here:
+                self._profile_lock.release()
+        if not found and not self._collection_complete and not self._collection_needs_verification:
+            raise RuntimeError(self._collection_warning or "TikTok 没有返回可读取的作品，尚未抓完。")
+        return list(found.values())
     def enrich(self, videos):
         """Fill engagement metadata progressively; failures leave the fast list usable."""
         import yt_dlp
@@ -568,7 +1104,7 @@ class Api:
                 self._emit("metadataUpdate", item)
                 continue
             try:
-                with yt_dlp.YoutubeDL(options) as ydl:
+                with self._youtube_dl(options) as ydl:
                     info = ydl.extract_info(item["url"], download=False)
                 item.update({
                     "title": info.get("description") or info.get("title") or item.get("title"),
@@ -687,7 +1223,7 @@ class Api:
                        "subtitlesformat": "srt/vtt/best", "overwrites": True,
                        "impersonate": ImpersonateTarget.from_str("chrome")}
             self._apply_cookie_options(options)
-            with yt_dlp.YoutubeDL(options) as ydl:
+            with self._youtube_dl(options) as ydl:
                 ydl.download([item["url"]])
             _, tracks = self._files_for_item(target, item["id"], item)
             paths = [str(path) for path in tracks]
@@ -830,7 +1366,7 @@ class Api:
                 last_video_error = None
                 for video_attempt in range(1, max(1, int(retry_count) + 1) + 1):
                     try:
-                        with yt_dlp.YoutubeDL(options) as ydl:
+                        with self._youtube_dl(options) as ydl:
                             ydl.download([item["url"]])
                         media_files, subtitle_files = self._files_for_item(target, item["id"], item)
                         if not media_files:
@@ -865,6 +1401,29 @@ class Api:
 
 
 if __name__ == "__main__":
+    if "--browser-probe" in sys.argv:
+        report_path = Path(sys.argv[sys.argv.index("--browser-probe") + 1])
+        report = {"ok": False}
+        try:
+            probe_api = Api()
+            status = probe_api.set_cookie_options("", "saved")
+            with sync_playwright() as probe_playwright:
+                probe_browser, probe_context = probe_api._browser_context(
+                    probe_playwright, reuse_login=True, headless=False)
+                try:
+                    probe_page = probe_context.pages[0] if probe_context.pages else probe_context.new_page()
+                    probe_page.goto("https://www.tiktok.com/@apple", wait_until="domcontentloaded", timeout=60000)
+                    report = {"ok": True, "session": bool(status.get("hasSession")),
+                              "url": probe_page.url, "title": probe_page.title()}
+                    time.sleep(3)
+                finally:
+                    probe_context.close()
+                    if probe_browser:
+                        probe_browser.close()
+        except Exception as exc:
+            report = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+        raise SystemExit(0 if report.get("ok") else 1)
     # Prevent accidental double launches from creating competing download windows.
     lock_path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "app.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
