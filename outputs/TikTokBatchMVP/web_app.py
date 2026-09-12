@@ -4,6 +4,8 @@ import re
 import sys
 import threading
 import time
+import msvcrt
+import shutil
 from pathlib import Path
 
 import webview
@@ -218,8 +220,13 @@ class Api:
                     cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
             except Exception:
                 pass
+            try:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
             self._emit("metadataStatus", {"current": index, "total": len(videos)})
-            time.sleep(0.35)
+            time.sleep(0.2)
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
         return {"updated": updated}
@@ -277,7 +284,7 @@ class Api:
         self._pause_downloads.clear()
         return True
 
-    def download(self, videos, folder, quality):
+    def download(self, videos, folder, quality, retry_count=3, concurrency=1):
         import yt_dlp
 
         username_match = re.search(r"/@([^/?]+)", videos[0].get("url", "")) if videos else None
@@ -285,6 +292,12 @@ class Api:
         safe_username = re.sub(r'[<>:"/\\|?*]', "_", username).strip(" .") or "unknown"
         target = Path(folder).expanduser() / f"@{safe_username}"
         target.mkdir(parents=True, exist_ok=True)
+        try:
+            free_bytes = shutil.disk_usage(str(target)).free
+            if free_bytes < 200 * 1024 * 1024:
+                raise RuntimeError(f"保存磁盘空间不足：仅剩 {free_bytes / 1024 / 1024:.0f} MB")
+        except FileNotFoundError:
+            raise RuntimeError("保存目录不可用")
         formats = {
             "720p": "best[height<=720][format_note!=watermarked]/best[height<=720]/best",
             "540p": "best[height<=540][format_note!=watermarked]/best[height<=540]/best",
@@ -293,7 +306,7 @@ class Api:
         ok, failed = 0, []
         self._cancel_downloads.clear()
         self._pause_downloads.clear()
-        progress_context = {"id": "", "last_emit": 0.0, "last_percent": -1}
+        progress_context = {"id": "", "last_emit": 0.0, "last_percent": -1, "started": time.time()}
         def control_hook(data):
             while self._pause_downloads.is_set() and not self._cancel_downloads.is_set():
                 time.sleep(0.15)
@@ -308,12 +321,13 @@ class Api:
             if percent != progress_context["last_percent"] and (now - progress_context["last_emit"] >= .15 or percent == 100):
                 progress_context["last_emit"] = now
                 progress_context["last_percent"] = percent
+                elapsed = max(0.1, now - progress_context["started"])
                 self._emit("downloadProgress", {"id": progress_context["id"], "state": "progress", "percent": percent,
-                                                  "downloaded": downloaded, "totalBytes": total})
+                                                  "downloaded": downloaded, "totalBytes": total, "speed": downloaded / elapsed})
         for index, item in enumerate(videos, 1):
             if self._cancel_downloads.is_set():
                 break
-            progress_context.update({"id": item["id"], "last_emit": 0.0, "last_percent": -1})
+            progress_context.update({"id": item["id"], "last_emit": 0.0, "last_percent": -1, "started": time.time()})
             self._emit("downloadProgress", {"id": item["id"], "index": index, "total": len(videos), "state": "downloading", "percent": 0})
             try:
                 existing = [path for path in target.iterdir() if path.is_file() and f"_[{item['id']}]" in path.name]
@@ -335,8 +349,19 @@ class Api:
                             raise RuntimeError("用户取消下载")
                         while self._pause_downloads.is_set() and not self._cancel_downloads.is_set():
                             time.sleep(.15)
-                        response = requests.get(photo_url, headers={"Referer": item["url"], "User-Agent": "Mozilla/5.0"}, timeout=30)
-                        response.raise_for_status()
+                        response = None
+                        last_photo_error = None
+                        for photo_attempt in range(1, max(1, int(retry_count) + 1)):
+                            try:
+                                response = requests.get(photo_url, headers={"Referer": item["url"], "User-Agent": "Mozilla/5.0"}, timeout=45)
+                                response.raise_for_status()
+                                break
+                            except Exception as photo_exc:
+                                last_photo_error = photo_exc
+                                if photo_attempt < max(1, int(retry_count) + 1):
+                                    time.sleep(photo_attempt)
+                        if response is None:
+                            raise RuntimeError(f"图片下载失败：{last_photo_error}")
                         output = post_folder / f"{photo_index:02d}.jpg"
                         output.write_bytes(response.content)
                         self._emit("downloadProgress", {"id": item["id"], "state": "progress", "percent": round(photo_index * 100 / len(urls))})
@@ -347,15 +372,34 @@ class Api:
                     "outtmpl": str(target / "%(title).100B_%(upload_date)s_[%(id)s].%(ext)s"),
                     "format": fmt,
                     "noplaylist": True,
-                    "retries": 3,
+                    "retries": max(0, int(retry_count)),
                     "continuedl": True,
                     "windowsfilenames": True,
                     "quiet": True,
                     "no_warnings": True,
                     "progress_hooks": [control_hook],
                 }
-                with yt_dlp.YoutubeDL(options) as ydl:
-                    ydl.download([item["url"]])
+                last_video_error = None
+                for video_attempt in range(1, max(1, int(retry_count) + 1) + 1):
+                    try:
+                        with yt_dlp.YoutubeDL(options) as ydl:
+                            ydl.download([item["url"]])
+                        if not any(path.is_file() and f"_[{item['id']}]" in path.name for path in target.iterdir()):
+                            raise RuntimeError("下载器未生成目标文件")
+                        last_video_error = None
+                        break
+                    except Exception as video_exc:
+                        last_video_error = video_exc
+                        if video_attempt < max(1, int(retry_count) + 1):
+                            self._emit("downloadProgress", {"id": item["id"], "state": "retrying", "attempt": video_attempt + 1})
+                            for _ in range(int(min(10, video_attempt * 3))):
+                                if self._cancel_downloads.is_set():
+                                    raise RuntimeError("用户取消下载")
+                                while self._pause_downloads.is_set() and not self._cancel_downloads.is_set():
+                                    time.sleep(0.15)
+                                time.sleep(0.5)
+                if last_video_error is not None:
+                    raise last_video_error
                 ok += 1
                 self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target)})
             except Exception as exc:
@@ -368,6 +412,22 @@ class Api:
 
 
 if __name__ == "__main__":
+    # Prevent accidental double launches from creating competing download windows.
+    lock_path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "app.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = open(lock_path, "a+")
+    try:
+        msvcrt.locking(lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        lock_handle.close()
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk(); root.withdraw(); messagebox.showinfo("TikTok 下载器", "程序已经在运行中，请切换到已有窗口。")
+            root.destroy()
+        except Exception:
+            pass
+        raise SystemExit(0)
     api = Api()
     api._window = webview.create_window(
         "TikTok 下载器",
