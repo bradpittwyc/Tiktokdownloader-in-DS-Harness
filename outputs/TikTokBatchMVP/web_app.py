@@ -76,6 +76,16 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def recognize_many(self, raw_urls):
+        results = []
+        for raw_url in raw_urls:
+            value = self.recognize(raw_url)
+            if value.get("ok"):
+                results.append(value)
+        if not results:
+            return {"ok": False, "error": "没有成功读取任何博主"}
+        return {"ok": True, "profiles": results}
+
     def recent_profiles(self):
         root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "cache"
         profiles = []
