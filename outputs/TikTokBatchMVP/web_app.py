@@ -1,4 +1,6 @@
 import json
+import http.cookiejar
+import csv
 import os
 import re
 import sys
@@ -25,6 +27,43 @@ class Api:
         self._profile_stats = {}
         self._pause_downloads = threading.Event()
         self._cancel_downloads = threading.Event()
+        self._cookie_file = ""
+        self._cookie_browser = ""
+
+    def set_cookie_options(self, cookie_file="", browser=""):
+        allowed = {"", "chrome", "edge"}
+        self._cookie_file = str(cookie_file or "").strip()
+        self._cookie_browser = str(browser or "").lower().strip()
+        if self._cookie_browser not in allowed:
+            self._cookie_browser = ""
+        return {"ok": True}
+
+    def choose_cookie_file(self):
+        result = self._window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("Cookie 文件 (*.txt;*.cookies)", "所有文件 (*.*)"),
+        )
+        return result[0] if result else None
+
+    def _playwright_cookies(self):
+        if not self._cookie_file or not Path(self._cookie_file).is_file():
+            return []
+        jar = http.cookiejar.MozillaCookieJar(self._cookie_file)
+        jar.load(ignore_discard=True, ignore_expires=True)
+        return [
+            {"name": c.name, "value": c.value, "domain": c.domain,
+             "path": c.path or "/", "secure": bool(c.secure),
+             "expires": int(c.expires) if c.expires else -1}
+            for c in jar if "tiktok.com" in c.domain
+        ]
+
+    def _apply_cookie_options(self, options):
+        if self._cookie_file and Path(self._cookie_file).is_file():
+            options["cookiefile"] = self._cookie_file
+        elif self._cookie_browser:
+            options["cookiesfrombrowser"] = (self._cookie_browser,)
+        return options
 
     def _emit(self, function, value):
         if self._window:
@@ -156,7 +195,11 @@ class Api:
 
     def _browser_context(self, playwright):
         browser = playwright.chromium.launch(executable_path=find_chrome(), headless=True, args=["--disable-blink-features=AutomationControlled"])
-        return browser, browser.new_context(viewport={"width": 1280, "height": 900})
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        cookies = self._playwright_cookies()
+        if cookies:
+            context.add_cookies(cookies)
+        return browser, context
 
     def _collect_videos(self, url):
         from playwright.sync_api import sync_playwright
@@ -230,6 +273,7 @@ class Api:
         updated = 0
         options = {"quiet": True, "no_warnings": True, "skip_download": True,
                    "socket_timeout": 20, "retries": 1, "noplaylist": True}
+        self._apply_cookie_options(options)
         for index, item in enumerate(videos, 1):
             if item.get("type") == "image" or "/photo/" in item.get("url", ""):
                 if not item.get("upload_date"):
@@ -274,6 +318,32 @@ class Api:
     def choose_folder(self):
         result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
         return result[0] if result else None
+
+    def export_csv(self, rows, suggested_name="tiktok-works.csv"):
+        try:
+            result = self._window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=suggested_name,
+                file_types=("CSV 文件 (*.csv)",),
+            )
+            if not result:
+                return {"ok": False, "cancelled": True}
+            path = result[0] if isinstance(result, (list, tuple)) else result
+            target = Path(path)
+            if target.suffix.lower() != ".csv":
+                target = target.with_suffix(".csv")
+            columns = [
+                "博主ID", "作品ID", "发布时间", "文案", "类型", "时长(秒)",
+                "点赞数", "评论数", "分享数", "播放量", "点赞率", "评论率", "分享率",
+                "本地文件夹", "原始TikTok链接", "下载状态", "学习状态", "标签", "学习笔记",
+            ]
+            with target.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=columns)
+                writer.writeheader()
+                writer.writerows(rows)
+            return {"ok": True, "path": str(target), "count": len(rows)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def open_folder(self, folder):
         try:
@@ -440,6 +510,7 @@ class Api:
                     "no_warnings": True,
                     "progress_hooks": [control_hook],
                 }
+                self._apply_cookie_options(options)
                 last_video_error = None
                 for video_attempt in range(1, max(1, int(retry_count) + 1) + 1):
                     try:

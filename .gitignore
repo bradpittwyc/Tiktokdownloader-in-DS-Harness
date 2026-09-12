@@ -1,4 +1,9 @@
 outputs/TikTokBatchMVP/TikTokBatchMVP.exe
+build/
+dist/
+release/
+outputs/TikTokBatchMVP/ui/tiktok-logo.jpg
+outputs/*.mp4
 work/
 __pycache__/
 *.pyc
