@@ -8,10 +8,20 @@ import threading
 import time
 import msvcrt
 import shutil
+import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import requests
 import webview
+import yt_dlp
+import curl_cffi
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
+from yt_dlp.networking.impersonate import ImpersonateTarget
+from playwright.sync_api import sync_playwright
 
 from app import clean_profile_url, find_chrome
 
@@ -29,6 +39,214 @@ class Api:
         self._cancel_downloads = threading.Event()
         self._cookie_file = ""
         self._cookie_browser = ""
+        self._filename_template = self._load_filename_template()
+        self._learning = self._load_learning_options()
+
+    def _load_filename_template(self):
+        path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "filename-template.txt"
+        try:
+            return path.read_text(encoding="utf-8").strip() or "%(title).150B_%(upload_date)s"
+        except Exception:
+            return "%(title).150B_%(upload_date)s"
+
+    def get_filename_template(self):
+        return self._filename_template
+
+    def set_filename_template(self, value):
+        value = str(value or "%(title).150B_%(upload_date)s").strip().replace("{title}", "%(title)s").replace("{date}", "%(upload_date)s")
+        if "%(title)" not in value:
+            value = "%(title).150B_" + value
+        self._filename_template = value[:220]
+        path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "filename-template.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._filename_template, encoding="utf-8")
+        return {"ok": True, "template": self._filename_template}
+
+    def _learning_file(self):
+        root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / "learning.json"
+
+    def _load_learning_options(self):
+        defaults = {"enabled": False, "translation": True, "vocabulary": True,
+                    "timestamps": True, "api_base": "https://api.openai.com/v1",
+                    "model": "gpt-4o-mini", "api_key": ""}
+        try:
+            saved = json.loads(self._learning_file().read_text(encoding="utf-8"))
+            if isinstance(saved, dict): defaults.update(saved)
+        except Exception:
+            pass
+        return defaults
+
+    def get_learning_options(self):
+        value = dict(self._learning)
+        value["api_key"] = ""
+        value["apiKeySet"] = bool(self._learning.get("api_key"))
+        return value
+
+    def set_learning_options(self, options):
+        options = options or {}
+        current = self._learning
+        key = str(options.get("api_key") or "").strip()
+        if key:
+            current["api_key"] = key
+        current.update({
+            "enabled": bool(options.get("enabled")),
+            "translation": bool(options.get("translation", True)),
+            "vocabulary": bool(options.get("vocabulary", True)),
+            "timestamps": bool(options.get("timestamps", True)),
+            "api_base": str(options.get("api_base") or "https://api.openai.com/v1").strip().rstrip("/"),
+            "model": str(options.get("model") or "gpt-4o-mini").strip(),
+        })
+        self._learning_file().write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+        return self.get_learning_options()
+
+    def test_learning_api(self, options):
+        self.set_learning_options(options)
+        if not self._learning.get("api_key"):
+            return {"ok": False, "error": "请先填写 API Key"}
+        try:
+            text = self._call_learning_model("Reply with OK", max_tokens=8)
+            return {"ok": True, "message": text[:80]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def _call_learning_model(self, prompt, max_tokens=6000):
+        base = self._learning["api_base"].rstrip("/")
+        endpoint = base if base.endswith("/chat/completions") else base + "/chat/completions"
+        response = requests.post(endpoint, headers={"Authorization": f"Bearer {self._learning['api_key']}",
+            "Content-Type": "application/json"}, json={"model": self._learning["model"], "temperature": .25,
+            "max_tokens": max_tokens, "messages": [{"role": "system", "content": "You are a precise English learning editor."},
+            {"role": "user", "content": prompt}]}, timeout=180)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"].strip()
+
+    @staticmethod
+    def _subtitle_text(paths):
+        candidates = [Path(x) for x in paths if Path(x).suffix.lower() in {".srt", ".vtt"}]
+        candidates.sort(key=lambda p: (".en" not in p.name.lower(), p.suffix.lower() != ".srt"))
+        if not candidates: return ""
+        raw = candidates[0].read_text(encoding="utf-8", errors="ignore")
+        lines = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.isdigit() or "-->" in line or line.startswith(("WEBVTT", "NOTE")): continue
+            line = re.sub(r"<[^>]+>", "", line)
+            if not lines or lines[-1] != line: lines.append(line)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _write_learning_docx(content, output, item):
+        """Turn the model response into a Chinese and English formatted Word study sheet."""
+        document = Document()
+        section = document.sections[0]
+        section.top_margin = section.bottom_margin = Pt(50)
+        section.left_margin = section.right_margin = Pt(54)
+        styles = document.styles
+        styles["Normal"].font.name = "Times New Roman"
+        styles["Normal"]._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+        styles["Normal"].font.size = Pt(10.5)
+        lines = content.replace("\r\n", "\n").split("\n")
+        generated_title = next((line[2:].strip() for line in lines if line.startswith("# ")), "")
+        title = document.add_paragraph(style="Title")
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = title.add_run(generated_title or item.get("title") or "TikTok English Study Notes")
+        run.bold = True
+        run.font.name = "Times New Roman"
+        run.font.color.rgb = RGBColor(0, 0, 0)
+        subtitle = document.add_paragraph()
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        subtitle.add_run("TikTok English Learning Notes").italic = True
+        subtitle.runs[0].font.name = "Times New Roman"
+        subtitle.runs[0].font.color.rgb = RGBColor(90, 100, 115)
+        def add_mixed(paragraph, text, bold=False):
+            for part in re.findall(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+|[^\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+", text):
+                run = paragraph.add_run(part)
+                run.bold = bold
+                if re.search(r"[\u4e00-\u9fff]", part):
+                    run.font.name = "Microsoft YaHei"
+                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+                else:
+                    run.font.name = "Times New Roman"
+
+        def finish_paragraph(text, style=None):
+            paragraph = document.add_paragraph(style=style) if style else document.add_paragraph()
+            for part in re.split(r"(\*\*[^*]+\*\*)", text):
+                add_mixed(paragraph, part.strip("*"), part.startswith("**") and part.endswith("**"))
+            paragraph.paragraph_format.space_after = Pt(5)
+            paragraph.paragraph_format.line_spacing = 1.28
+
+        flowing_section, flowing = "", []
+        def flush_flowing():
+            nonlocal flowing
+            if flowing:
+                separator = "" if flowing_section == "中文对照" else " "
+                finish_paragraph(separator.join(flowing))
+                flowing = []
+
+        for raw in lines:
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith("# "):
+                continue
+            if line.startswith("## ") or line.startswith("### "):
+                flush_flowing()
+                heading = line[3:] if line.startswith("## ") else line[4:]
+                paragraph = document.add_paragraph(style="Heading 2")
+                add_mixed(paragraph, heading, True)
+                color = RGBColor(227, 108, 10) if "视频主题" in heading else RGBColor(148, 54, 52)
+                for run in paragraph.runs: run.font.color.rgb = color
+                flowing_section = heading
+                continue
+            if flowing_section in {"英文原文", "中文对照"}:
+                flowing.append(line)
+                continue
+            if line.startswith("### "):
+                paragraph = document.add_paragraph(line[4:], style="Heading 3")
+            elif line.startswith(("- ", "* ", "• ")):
+                paragraph = document.add_paragraph(style="List Bullet")
+                add_mixed(paragraph, line[2:])
+            elif re.match(r"^\d+[.)]\s+", line):
+                paragraph = document.add_paragraph(style="List Number")
+                add_mixed(paragraph, re.sub(r"^\d+[.)]\s+", "", line))
+            else:
+                finish_paragraph(line)
+                continue
+            paragraph.paragraph_format.space_after = Pt(5)
+            paragraph.paragraph_format.line_spacing = 1.28
+        flush_flowing()
+        document.save(output)
+
+    def _generate_learning_document(self, item, target, subtitle_paths):
+        try:
+            text = self._subtitle_text(subtitle_paths)
+            if not text:
+                self._emit("learningProgress", {"id": item["id"], "state": "skipped", "message": "未找到可读的 SRT/VTT 字幕"})
+                return
+            self._emit("learningProgress", {"id": item["id"], "state": "working", "message": "正在生成英文学习文档…"})
+            opts = self._learning
+            sections = ["保留完整英文原文", "给出自然中文对照" if opts["translation"] else "不需要中文翻译",
+                        "提炼重点词汇、音标/词性、中文义和例句" if opts["vocabulary"] else "不需要词汇表",
+                        "讲解高价值句型、固定搭配和可模仿表达"]
+            if opts["timestamps"]: sections.append("按内容段落标出对应时间码；字幕中没有时间码时按段落编号")
+            prompt = "请基于以下 TikTok 英文字幕生成一份适合中国学习者的 Markdown 学习文档。" + "；".join(sections) + "。第一行必须是 # 后跟完整、自然、能概括视频主题的英文标题；自己根据字幕判断标题，不能截断，也不要复述文件名。后续严格使用：## 视频主题、## 英文原文、## 中文对照、## 重点词汇、## 句型与表达、## 跟读练习。英文原文和中文对照均按自然段连续书写，绝对不要按字幕逐行换行；只有跟读练习按短句逐行排列。不要编造字幕里不存在的内容。\n\n字幕：\n" + text[:30000]
+            document = self._call_learning_model(prompt)
+            generated_title = next((line[2:].strip() for line in document.splitlines() if line.startswith("# ")), item.get("title") or "英文学习")
+            title = re.sub(r'[<>:"/\\|?*]+', '_', generated_title).strip(" .")[:140] or "英文学习"
+            stamp = item.get("upload_date") or time.strftime("%Y%m%d")
+            media_files, _ = self._files_for_item(Path(target), item["id"], item)
+            base = media_files[0].stem if media_files else f"{title}_{stamp}"
+            output = Path(target) / f"{base}.docx"
+            self._write_learning_docx(document, output, item)
+            self._emit("learningProgress", {"id": item["id"], "state": "done", "path": str(output), "message": "英文学习文档已保存"})
+        except Exception as exc:
+            self._emit("learningProgress", {"id": item["id"], "state": "failed", "message": str(exc)})
+
+    def _queue_learning_document(self, item, target, subtitle_paths):
+        if self._learning.get("enabled") and self._learning.get("api_key") and subtitle_paths:
+            threading.Thread(target=self._generate_learning_document, args=(item, target, subtitle_paths), daemon=True).start()
 
     def set_cookie_options(self, cookie_file="", browser=""):
         allowed = {"", "chrome", "edge"}
@@ -64,6 +282,19 @@ class Api:
         elif self._cookie_browser:
             options["cookiesfrombrowser"] = (self._cookie_browser,)
         return options
+
+    def _files_for_item(self, folder, item_id, item=None):
+        files = [path for path in Path(folder).iterdir() if path.is_file() and f"_[{item_id}]" in path.name]
+        if not files and item:
+            title = re.sub(r'[<>:"/\\|?*]+', '_', item.get("title") or "").strip(" .")
+            stamp = item.get("upload_date") or ""
+            if title:
+                files = [path for path in Path(folder).iterdir() if path.is_file() and title[:60].lower() in path.stem.lower() and (not stamp or stamp in path.name)]
+        media_exts = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".jpg", ".jpeg", ".png", ".webp"}
+        subtitle_exts = {".srt", ".vtt", ".ass", ".ttml", ".srv1", ".srv2", ".srv3", ".json"}
+        media = [path for path in files if path.suffix.lower() in media_exts]
+        subtitles = [path for path in files if path.suffix.lower() in subtitle_exts]
+        return media, subtitles
 
     def _emit(self, function, value):
         if self._window:
@@ -166,7 +397,7 @@ class Api:
                     continue
                 username = cached.get("avatar_owner") or ""
                 avatar = cached.get("avatar") or ""
-                if not username or not avatar or "tiktokcdn.com" not in avatar:
+                if not username:
                     continue
                 profiles.append({"username": username, "avatar": avatar,
                                  "count": len(cached.get("videos") or [])})
@@ -175,6 +406,57 @@ class Api:
             except Exception:
                 continue
         return profiles
+
+    def refresh_recent_profiles(self):
+        """Repair stale avatar cache entries without opening a visible browser."""
+        profiles = self.recent_profiles()
+        seen, refresh = set(), []
+        for profile in profiles:
+            # A CDN avatar URL shared by multiple creators is stale cache data.
+            key = profile["avatar"].split("?", 1)[0] if profile["avatar"] else f"empty:{profile['username']}"
+            if not profile["avatar"] or key in seen:
+                refresh.append(profile["username"])
+            else:
+                seen.add(key)
+        if not refresh:
+            return {"ok": True, "profiles": profiles}
+        with sync_playwright() as playwright:
+            for username in refresh:
+                browser = context = None
+                try:
+                    # TikTok's SPA can retain the first profile while navigating in
+                    # one tab. A fresh context makes the avatar belong to this ID.
+                    browser, context = self._browser_context(playwright)
+                    page = context.pages[0] if context.pages else context.new_page()
+                    page.goto(f"https://www.tiktok.com/@{username}?lang=en", wait_until="domcontentloaded", timeout=45000)
+                    # TikTok initially paints stale SPA content; wait for the
+                    # profile image to settle before caching it.
+                    page.wait_for_timeout(5000)
+                    avatar = page.evaluate("""()=>{const image=document.querySelector('[data-e2e="user-avatar"] img');return image?(image.currentSrc||image.src||''):''}""")
+                    if not avatar or "tiktokcdn.com" not in avatar:
+                        path = self._cache_file(username)
+                        if path.exists():
+                            data = json.loads(path.read_text(encoding="utf-8"))
+                            if isinstance(data, dict):
+                                data["avatar"] = ""
+                                path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                        continue
+                    path = self._cache_file(username)
+                    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+                    if isinstance(data, dict):
+                        data["avatar"] = avatar
+                        data["avatar_owner"] = username
+                        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    continue
+                finally:
+                    if context:
+                        try: context.close()
+                        except Exception: pass
+                    if browser:
+                        try: browser.close()
+                        except Exception: pass
+        return {"ok": True, "profiles": self.recent_profiles()}
 
     def remove_recent_profile(self, username):
         try:
@@ -202,8 +484,6 @@ class Api:
         return browser, context
 
     def _collect_videos(self, url):
-        from playwright.sync_api import sync_playwright
-
         username_match = re.search(r"/@([^/?]+)", url)
         username = username_match.group(1) if username_match else ""
         last_error = ""
@@ -394,6 +674,33 @@ class Api:
         self._pause_downloads.clear()
         return True
 
+    def regenerate_learning_document(self, item, folder):
+        """Refresh subtitle tracks and create a new study note without downloading media again."""
+        try:
+            target = Path(folder)
+            if not target.is_dir():
+                return {"ok": False, "error": "原下载文件夹不存在"}
+            self._emit("learningProgress", {"id": item["id"], "state": "working", "message": "正在重新抓取字幕…"})
+            options = {"outtmpl": str(target / (self._filename_template if "%(ext)" in self._filename_template else self._filename_template + ".%(ext)s")),
+                       "skip_download": True, "noplaylist": True, "quiet": True, "no_warnings": True,
+                       "writesubtitles": True, "writeautomaticsub": True, "subtitleslangs": ["all"],
+                       "subtitlesformat": "srt/vtt/best", "overwrites": True,
+                       "impersonate": ImpersonateTarget.from_str("chrome")}
+            self._apply_cookie_options(options)
+            with yt_dlp.YoutubeDL(options) as ydl:
+                ydl.download([item["url"]])
+            _, tracks = self._files_for_item(target, item["id"], item)
+            paths = [str(path) for path in tracks]
+            if not paths:
+                return {"ok": False, "error": "该作品没有可下载的字幕轨"}
+            if not self._learning.get("enabled") or not self._learning.get("api_key"):
+                return {"ok": True, "subtitles": paths, "message": "字幕已刷新；请在设置中启用并配置学习文档 API"}
+            threading.Thread(target=self._generate_learning_document, args=(item, target, paths), daemon=True).start()
+            return {"ok": True, "subtitles": paths, "message": "字幕已刷新，正在生成学习文档"}
+        except Exception as exc:
+            self._emit("learningProgress", {"id": item.get("id", ""), "state": "failed", "message": str(exc)})
+            return {"ok": False, "error": str(exc)}
+
     def download(self, videos, folder, quality, retry_count=3, concurrency=1, _worker=False):
         import yt_dlp
 
@@ -461,9 +768,10 @@ class Api:
             progress_context.update({"id": item["id"], "last_emit": 0.0, "last_percent": -1, "started": time.time()})
             self._emit("downloadProgress", {"id": item["id"], "index": index, "total": len(videos), "state": "downloading", "percent": 0})
             try:
-                existing = [path for path in target.iterdir() if path.is_file() and f"_[{item['id']}]" in path.name]
-                if existing:
-                    self._emit("downloadProgress", {"id": item["id"], "state": "skipped", "folder": str(target)})
+                existing_media, existing_subtitles = self._files_for_item(target, item["id"], item)
+                if existing_media:
+                    self._emit("downloadProgress", {"id": item["id"], "state": "skipped", "folder": str(target),
+                                                     "subtitles": [str(path) for path in existing_subtitles]})
                     continue
                 if item.get("type") == "image" or "/photo/" in item.get("url", ""):
                     import requests
@@ -497,10 +805,10 @@ class Api:
                         output.write_bytes(response.content)
                         self._emit("downloadProgress", {"id": item["id"], "state": "progress", "percent": round(photo_index * 100 / len(urls))})
                     ok += 1
-                    self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target)})
+                    self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target), "subtitles": []})
                     continue
                 options = {
-                    "outtmpl": str(target / "%(title).100B_%(upload_date)s_[%(id)s].%(ext)s"),
+                    "outtmpl": str(target / (self._filename_template if "%(ext)" in self._filename_template else self._filename_template + ".%(ext)s")),
                     "format": fmt,
                     "noplaylist": True,
                     "retries": max(0, int(retry_count)),
@@ -508,7 +816,15 @@ class Api:
                     "windowsfilenames": True,
                     "quiet": True,
                     "no_warnings": True,
+                    # TikTok returns a challenge page to generic HTTP clients.
+                    # Use yt-dlp's curl_cffi handler to make the request match a
+                    # current Chrome browser before extracting the media URLs.
+                    "impersonate": ImpersonateTarget.from_str("chrome"),
                     "progress_hooks": [control_hook],
+                    "writesubtitles": True,
+                    "writeautomaticsub": True,
+                    "subtitleslangs": ["all"],
+                    "subtitlesformat": "srt/vtt/best",
                 }
                 self._apply_cookie_options(options)
                 last_video_error = None
@@ -516,7 +832,8 @@ class Api:
                     try:
                         with yt_dlp.YoutubeDL(options) as ydl:
                             ydl.download([item["url"]])
-                        if not any(path.is_file() and f"_[{item['id']}]" in path.name for path in target.iterdir()):
+                        media_files, subtitle_files = self._files_for_item(target, item["id"], item)
+                        if not media_files:
                             raise RuntimeError("下载器未生成目标文件")
                         last_video_error = None
                         break
@@ -533,7 +850,11 @@ class Api:
                 if last_video_error is not None:
                     raise last_video_error
                 ok += 1
-                self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target)})
+                _, subtitle_files = self._files_for_item(target, item["id"], item)
+                subtitle_paths = [str(path) for path in subtitle_files]
+                self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target),
+                                                 "subtitles": subtitle_paths})
+                self._queue_learning_document(item, target, subtitle_paths)
             except Exception as exc:
                 if self._cancel_downloads.is_set():
                     self._emit("downloadProgress", {"id": item["id"], "state": "cancelled"})
