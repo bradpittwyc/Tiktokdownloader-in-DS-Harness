@@ -1,0 +1,4 @@
+outputs/TikTokBatchMVP/TikTokBatchMVP.exe
+work/
+__pycache__/
+*.pyc
