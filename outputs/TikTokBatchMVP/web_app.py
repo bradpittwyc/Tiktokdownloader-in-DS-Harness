@@ -306,7 +306,7 @@ class Api:
             progress_context.update({"id": item["id"], "last_emit": 0.0, "last_percent": -1})
             self._emit("downloadProgress", {"id": item["id"], "index": index, "total": len(videos), "state": "downloading", "percent": 0})
             try:
-                existing = list(target.glob(f"*_[{item['id']}].*"))
+                existing = [path for path in target.iterdir() if path.is_file() and f"_[{item['id']}]" in path.name]
                 if existing:
                     self._emit("downloadProgress", {"id": item["id"], "state": "skipped", "folder": str(target)})
                     continue
@@ -353,7 +353,7 @@ class Api:
                     self._emit("downloadProgress", {"id": item["id"], "state": "cancelled"})
                     break
                 failed.append({"id": item["id"], "error": str(exc)})
-                self._emit("downloadProgress", {"id": item["id"], "state": "failed"})
+                self._emit("downloadProgress", {"id": item["id"], "state": "failed", "error": str(exc)})
         return {"ok": ok, "failed": failed, "folder": str(target)}
 
 
