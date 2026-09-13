@@ -31,6 +31,13 @@ from session_store import SessionStore, tiktok_cookies, has_session, chrome_app_
 
 BASE = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).parent
 
+# 固定取「无水印的最佳源」，不再提供画质选项。
+# TikTok 对同一个视频同时给出两份：带水印的 download 格式，以及无水印的
+# play_addr 系列（format_id 形如 bytevc1_1080p_1423531-1、h264_720p_2172543-1，
+# 即 <编码器>_<档位>p_<码率>-<序号>）。format_note 为 watermarked 的就是前者，
+# 这里排除掉，剩下的交给 yt-dlp 选它认为最好的那个。
+BEST_FORMAT = "best[format_note!=watermarked]/best"
+
 
 class Api:
     def __init__(self):
@@ -1237,7 +1244,7 @@ class Api:
             self._emit("learningProgress", {"id": item.get("id", ""), "state": "failed", "message": str(exc)})
             return {"ok": False, "error": str(exc)}
 
-    def download(self, videos, folder, quality, retry_count=3, concurrency=1, _worker=False):
+    def download(self, videos, folder, retry_count=3, concurrency=1, _worker=False):
         import yt_dlp
 
         concurrency = max(1, min(8, int(concurrency or 1)))
@@ -1247,7 +1254,7 @@ class Api:
             results = []
             with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="TikTokDownload") as pool:
                 futures = {
-                    pool.submit(self.download, [item], folder, quality, retry_count, 1, True): item
+                    pool.submit(self.download, [item], folder, retry_count, 1, True): item
                     for item in videos
                 }
                 for future in as_completed(futures):
@@ -1271,11 +1278,6 @@ class Api:
                 raise RuntimeError(f"保存磁盘空间不足：仅剩 {free_bytes / 1024 / 1024:.0f} MB")
         except FileNotFoundError:
             raise RuntimeError("保存目录不可用")
-        formats = {
-            "720p": "best[height<=720][format_note!=watermarked]/best[height<=720]/best",
-            "540p": "best[height<=540][format_note!=watermarked]/best[height<=540]/best",
-        }
-        fmt = formats.get(quality, "best[format_note!=watermarked]/best")
         ok, failed = 0, []
         if not _worker:
             self._cancel_downloads.clear()
@@ -1345,7 +1347,7 @@ class Api:
                     continue
                 options = {
                     "outtmpl": str(target / (self._filename_template if "%(ext)" in self._filename_template else self._filename_template + ".%(ext)s")),
-                    "format": fmt,
+                    "format": BEST_FORMAT,
                     "noplaylist": True,
                     "retries": max(0, int(retry_count)),
                     "continuedl": True,
