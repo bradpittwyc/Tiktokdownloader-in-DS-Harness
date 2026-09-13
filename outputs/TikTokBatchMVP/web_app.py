@@ -1,6 +1,7 @@
 import json
 import http.cookiejar
 import csv
+import datetime
 import os
 import re
 import sys
@@ -69,6 +70,29 @@ def quality_format(quality):
 # because the slider lives in an injected iframe, not the top document.
 CHALLENGE_MARKERS = ("drag the slider to fit the puzzle", "verify to continue",
                      "拖动滑块", "完成下方验证")
+
+MEDIA_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".jpg", ".jpeg", ".png", ".webp"}
+SUBTITLE_EXTS = {".srt", ".vtt", ".ass", ".ttml", ".srv1", ".srv2", ".srv3", ".json"}
+
+
+def upload_date_matches(stamp, name):
+    """True when a filename carries this video's upload date.
+
+    The scraper derives the date from createTime in LOCAL time, while yt-dlp's
+    %(upload_date)s is UTC — so an evening upload lands one calendar day apart
+    and the file the downloader just wrote cannot be found again.
+    Measured on a real failure: item said 20260904, the file was ..._20260903.mp4.
+    """
+    if not stamp:
+        return True
+    if stamp in name:
+        return True
+    try:
+        day = datetime.datetime.strptime(str(stamp), "%Y%m%d").date()
+    except (ValueError, TypeError):
+        return False
+    return any((day + datetime.timedelta(days=offset)).strftime("%Y%m%d") in name
+               for offset in (1, -1))
 
 
 def page_challenged(page):
@@ -712,17 +736,28 @@ class Api:
         return downloader
 
     def _files_for_item(self, folder, item_id, item=None):
-        files = [path for path in Path(folder).iterdir() if path.is_file() and f"_[{item_id}]" in path.name]
+        folder = Path(folder)
+        # Primary: only matches when the filename template contains %(id)s, which
+        # the default one does NOT — so the fuzzy pass below is the real workhorse.
+        files = [path for path in folder.iterdir() if path.is_file() and f"_[{item_id}]" in path.name]
         if not files and item:
             title = re.sub(r'[<>:"/\\|?*]+', '_', item.get("title") or "").strip(" .")
             stamp = item.get("upload_date") or ""
             if title:
-                files = [path for path in Path(folder).iterdir() if path.is_file() and title[:60].lower() in path.stem.lower() and (not stamp or stamp in path.name)]
-        media_exts = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".jpg", ".jpeg", ".png", ".webp"}
-        subtitle_exts = {".srt", ".vtt", ".ass", ".ttml", ".srv1", ".srv2", ".srv3", ".json"}
-        media = [path for path in files if path.suffix.lower() in media_exts]
-        subtitles = [path for path in files if path.suffix.lower() in subtitle_exts]
+                files = [path for path in folder.iterdir() if path.is_file()
+                         and title[:60].lower() in path.stem.lower()
+                         and upload_date_matches(stamp, path.name)]
+        media = [path for path in files if path.suffix.lower() in MEDIA_EXTS]
+        subtitles = [path for path in files if path.suffix.lower() in SUBTITLE_EXTS]
         return media, subtitles
+
+    @staticmethod
+    def _subtitle_siblings(media_path, folder):
+        """yt-dlp names subtitles after the media file: <name>.<lang>.<ext>."""
+        stem = Path(media_path).stem
+        return [path for path in Path(folder).iterdir()
+                if path.is_file() and path.name.startswith(stem + ".")
+                and path.suffix.lower() in SUBTITLE_EXTS]
 
     def _emit(self, function, value):
         if self._window:
@@ -1592,7 +1627,8 @@ class Api:
         if not _worker:
             self._cancel_downloads.clear()
             self._pause_downloads.clear()
-        progress_context = {"id": "", "last_emit": 0.0, "last_percent": -1, "started": time.time()}
+        progress_context = {"id": "", "last_emit": 0.0, "last_percent": -1, "started": time.time(),
+                            "finished": []}
         def control_hook(data):
             while self._pause_downloads.is_set() and not self._cancel_downloads.is_set():
                 time.sleep(0.15)
@@ -1604,6 +1640,11 @@ class Api:
             now = time.time()
             if data.get("status") == "finished":
                 percent = 100
+                # yt-dlp tells us the exact path it wrote. Trust it over any
+                # attempt to reconstruct the name from the title template.
+                filename = data.get("filename")
+                if filename and filename not in progress_context["finished"]:
+                    progress_context["finished"].append(filename)
             if percent != progress_context["last_percent"] and (now - progress_context["last_emit"] >= .15 or percent == 100):
                 progress_context["last_emit"] = now
                 progress_context["last_percent"] = percent
@@ -1613,7 +1654,8 @@ class Api:
         for index, item in enumerate(videos, 1):
             if self._cancel_downloads.is_set():
                 break
-            progress_context.update({"id": item["id"], "last_emit": 0.0, "last_percent": -1, "started": time.time()})
+            progress_context.update({"id": item["id"], "last_emit": 0.0, "last_percent": -1,
+                                     "started": time.time(), "finished": []})
             self._emit("downloadProgress", {"id": item["id"], "index": index, "total": len(videos), "state": "downloading", "percent": 0})
             try:
                 existing_media, existing_subtitles = self._files_for_item(target, item["id"], item)
@@ -1676,13 +1718,24 @@ class Api:
                 }
                 self._apply_cookie_options(options)
                 last_video_error = None
+                resolved_subtitles = []
                 for video_attempt in range(1, max(1, int(retry_count) + 1) + 1):
                     try:
                         with self._youtube_dl(options) as ydl:
                             ydl.download([item["url"]])
                         media_files, subtitle_files = self._files_for_item(target, item["id"], item)
                         if not media_files:
+                            # Fall back to what yt-dlp said it wrote. Reconstructing
+                            # the name from the template breaks whenever the title
+                            # was rewritten, truncated on a byte boundary, or the
+                            # upload date crosses a timezone boundary.
+                            media_files = [Path(name) for name in progress_context["finished"]
+                                           if Path(name).is_file()]
+                            if media_files:
+                                subtitle_files = self._subtitle_siblings(media_files[0], target)
+                        if not media_files:
                             raise RuntimeError("下载器未生成目标文件")
+                        resolved_subtitles = subtitle_files
                         last_video_error = None
                         break
                     except Exception as video_exc:
@@ -1698,8 +1751,7 @@ class Api:
                 if last_video_error is not None:
                     raise last_video_error
                 ok += 1
-                _, subtitle_files = self._files_for_item(target, item["id"], item)
-                subtitle_paths = [str(path) for path in subtitle_files]
+                subtitle_paths = [str(path) for path in resolved_subtitles]
                 self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target),
                                                  "subtitles": subtitle_paths})
                 self._queue_learning_document(item, target, subtitle_paths)
