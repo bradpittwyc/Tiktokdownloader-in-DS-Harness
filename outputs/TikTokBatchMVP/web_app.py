@@ -31,12 +31,38 @@ from session_store import SessionStore, tiktok_cookies, has_session, chrome_app_
 
 BASE = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).parent
 
-# 固定取「无水印的最佳源」，不再提供画质选项。
-# TikTok 对同一个视频同时给出两份：带水印的 download 格式，以及无水印的
-# play_addr 系列（format_id 形如 bytevc1_1080p_1423531-1、h264_720p_2172543-1，
-# 即 <编码器>_<档位>p_<码率>-<序号>）。format_note 为 watermarked 的就是前者，
-# 这里排除掉，剩下的交给 yt-dlp 选它认为最好的那个。
-BEST_FORMAT = "best[format_note!=watermarked]/best"
+# TikTok 官方画质档位。实测所有视频只出现这三档，format_id 形如
+#     <编码器>_<档位>p_<码率>-<序号>
+# 例如 bytevc1_540p_740993-0、h264_720p_2172543-1、bytevc1_1080p_1423531-1。
+# 唯一不带档位标记的只有 audio（纯音频）与 download（带水印的那份）。
+QUALITY_TIERS = ("1080p", "720p", "540p")
+
+# 排除带水印格式的条件。
+# 注意不能写 format_note!=watermarked：yt-dlp 的过滤器遇到字段缺失时返回
+# none_inclusive，不写 ? 就是假，而除 download 外所有格式都没有 format_note
+# 字段 —— 实测该写法命中 0 个格式，整串静默落空（旧代码正是这样，一直靠末尾的
+# /best 兜底才没出事）。format_id 每个格式都有，用它排除最稳。
+NO_WATERMARK = "format_id!=download"
+
+
+def quality_format(quality):
+    """按 TikTok 官方档位构造 yt-dlp 的格式选择串。
+
+    为什么不用 height：竖版视频的 height 是「长边」（官方 1080p → 1080x1920、
+    720p → 720x1280、540p → 576x1024；实测 7 个视频共 50 个视频流全部 h > w），
+    所以 best[height<=720] 这类上限过滤会全部落空。format_id 里的档位标记
+    与横竖版无关，且每个视频流都带。
+
+    档位可用性因视频而异（同一视频不同次请求返回的格式集也可能不同），
+    因此末级回退到「最高可用无水印画质」而不是报错。
+    """
+    if quality in QUALITY_TIERS:
+        return "/".join([
+            f"best[format_id*=_{quality}_][{NO_WATERMARK}]",  # 精确官方档位
+            f"best[{NO_WATERMARK}]",                          # 该视频没有这个档位 → 取最高可用
+            "best",                                           # 最终兜底
+        ])
+    return f"best[{NO_WATERMARK}]/best"                       # 最佳画质
 
 
 class Api:
@@ -1244,7 +1270,7 @@ class Api:
             self._emit("learningProgress", {"id": item.get("id", ""), "state": "failed", "message": str(exc)})
             return {"ok": False, "error": str(exc)}
 
-    def download(self, videos, folder, retry_count=3, concurrency=1, _worker=False):
+    def download(self, videos, folder, quality, retry_count=3, concurrency=1, _worker=False):
         import yt_dlp
 
         concurrency = max(1, min(8, int(concurrency or 1)))
@@ -1254,7 +1280,7 @@ class Api:
             results = []
             with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="TikTokDownload") as pool:
                 futures = {
-                    pool.submit(self.download, [item], folder, retry_count, 1, True): item
+                    pool.submit(self.download, [item], folder, quality, retry_count, 1, True): item
                     for item in videos
                 }
                 for future in as_completed(futures):
@@ -1347,7 +1373,7 @@ class Api:
                     continue
                 options = {
                     "outtmpl": str(target / (self._filename_template if "%(ext)" in self._filename_template else self._filename_template + ".%(ext)s")),
-                    "format": BEST_FORMAT,
+                    "format": quality_format(quality),
                     "noplaylist": True,
                     "retries": max(0, int(retry_count)),
                     "continuedl": True,
