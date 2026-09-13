@@ -457,10 +457,8 @@ class Api:
                 try:
                     # Append rather than replace: _store_profile_archive merges by
                     # id, so the visible run's items survive even if the hand-off
-                    # returns a different (or empty) batch. force_profile is what
-                    # makes the hand-off land in the SAME verified profile; without
-                    # it the follow-up starts a browser TikTok never cleared.
-                    followup = self._collect_videos(url, lock_held=True, force_profile=True)
+                    # returns a different (or empty) batch.
+                    followup = self._collect_videos(url, lock_held=True)
                     log_event(f"[{username}] 后台接手结束: 抓到 {len(followup)} 条, "
                               f"完整={self._collection_complete}, "
                               f"需要验证={self._collection_needs_verification}, "
@@ -492,28 +490,8 @@ class Api:
             self._emit("verificationStatus", self._verification_status)
 
     def _close_login_browser(self, timeout=15):
-        """Stop the verification Chrome and wait for the profile lock to clear.
-
-        browser.close() only drops the CDP connection; the process survives and
-        keeps holding the user-data-dir, so a follow-up launch would fail.
-        """
-        process = self._login_process
-        if process is None or process.poll() is not None:
-            return
-        try:
-            process.terminate()
-        except Exception:
-            return
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                return
-            time.sleep(.25)
-        try:
-            process.kill()
-            process.wait(timeout=5)
-        except Exception:
-            pass
+        """Stop the verification Chrome and wait for the profile lock to clear."""
+        self._stop_process(self._login_process, timeout)
 
     def cancel_tiktok_login(self):
         self._login_cancel.set()
@@ -959,12 +937,9 @@ class Api:
     def _login_profile_dir(self):
         return self._session_store.root / "login-browser"
 
-    def _browser_context(self, playwright, reuse_login=False, headless=True, force_profile=False):
+    def _browser_context(self, playwright, reuse_login=False, headless=True):
         cookies = self._require_cookies()
-        # verify_profile ALWAYS opens the app-owned profile, so whatever the user
-        # solved lives there. Handing off to any other context throws the
-        # verification away and gets challenged again immediately.
-        if force_profile or (reuse_login and self._cookie_browser == "saved" and not self._cookie_file):
+        if reuse_login and self._cookie_browser == "saved" and not self._cookie_file:
             # Use the exact Chrome profile where the user logged in / verified.
             # Copying cookies into a fresh context discards site storage and cache.
             context = playwright.chromium.launch_persistent_context(
@@ -1037,8 +1012,77 @@ class Api:
         except Exception:
             return False
 
-    def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None,
-                        force_profile=False):
+    def _launch_native_chrome(self, url, visible=False):
+        """Start a real Chrome with CDP and return (process, cdp_url).
+
+        Playwright's own launchers (launch / launch_persistent_context) mark the
+        browser as automated, and TikTok's WAF answers with a ~1.6 KB block page.
+        Starting Chrome as a plain process and attaching over CDP does not — which
+        is exactly how the verification window always worked.
+
+        Measured on the same logged-in profile and the same URL:
+          launch_persistent_context -> net::ERR_HTTP_RESPONSE_CODE_FAILURE
+          subprocess + connect_over_cdp -> 680 KB real profile page, 26 cards
+        """
+        profile = self._login_profile_dir()
+        profile.mkdir(parents=True, exist_ok=True)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        command = [find_chrome(), f"--user-data-dir={profile}", "--profile-directory=Default",
+                   f"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1",
+                   "--no-first-run", "--no-default-browser-check", "--new-window",
+                   "--disable-background-mode"]
+        if not visible:
+            # A real (not headless) Chrome parked off-screen: the WAF must see a
+            # normal browser, the user must not see a window. Opening about:blank
+            # means cookies are in place before the first TikTok navigation.
+            command += ["--window-position=-32000,-32000", "about:blank"]
+        else:
+            command.append(url)
+        process = subprocess.Popen(command)
+        log_event(f"启动原生 Chrome: visible={visible}, port={port}, pid={process.pid}")
+        return process, f"http://127.0.0.1:{port}"
+
+    @staticmethod
+    def _stop_process(process, timeout=15):
+        """Stop a Chrome we started and wait for the profile lock to clear.
+
+        CDP teardown does not stop the process; a surviving Chrome keeps holding
+        the user-data-dir and the next launch fails.
+        """
+        if process is None or process.poll() is not None:
+            return
+        try:
+            process.terminate()
+        except Exception:
+            return
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                return
+            time.sleep(.25)
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except Exception:
+            pass
+
+    def _inject_cookies(self, context):
+        """Add every configured or freshly verified cookie the profile lacks."""
+        try:
+            cookies = self._require_cookies()
+            existing = tiktok_cookies(context.cookies())
+            keys = {(c["domain"], c["path"], c["name"]) for c in existing}
+            missing = [c for c in cookies + self._verified_cookies
+                       if (c["domain"], c["path"], c["name"]) not in keys]
+            if missing:
+                context.add_cookies(missing)
+                log_event(f"注入 {len(missing)} 条 cookie: {sorted(c['name'] for c in missing)}")
+        except Exception as exc:
+            log_event(f"注入 cookie 失败（继续）: {exc}")
+
+    def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None):
         from profile_pagination import ProfilePagination
 
         # Reject an invalid requested login source before Playwright starts.
@@ -1054,7 +1098,8 @@ class Api:
         incremental = bool(archive.get("history_complete"))
         found, pagination = {}, ProfilePagination(username)
         browser = context = page = None
-        log_event(f"抓取 @{username}: interactive={interactive}, force_profile={force_profile}, "
+        chrome_process = None
+        log_event(f"抓取 @{username}: interactive={interactive}, "
                   f"cdp={'有' if cdp_url else '无'}, 存档 {len(known_ids)} 条, 增量={incremental}, "
                   f"cookie来源={self._cookie_browser or '匿名'}")
 
@@ -1098,24 +1143,22 @@ class Api:
                 self._emit("setStatus", "正在后台读取主页…")
             with sync_playwright() as playwright:
                 try:
-                    if cdp_url:
-                        deadline = time.monotonic() + 18
-                        last_error = None
-                        while time.monotonic() < deadline and not self._login_cancel.is_set():
-                            try:
-                                browser = playwright.chromium.connect_over_cdp(cdp_url, timeout=3000)
-                                context = browser.contexts[0] if browser.contexts else None
-                                if context:
-                                    break
-                            except Exception as exc:
-                                last_error = exc
-                                time.sleep(.35)
-                        if not context:
-                            raise RuntimeError(f"Chrome 已启动，但软件无法连接验证窗口：{last_error or '连接超时'}")
-                    else:
-                        browser, context = self._browser_context(
-                            playwright, reuse_login=True, headless=not interactive,
-                            force_profile=force_profile)
+                    if not cdp_url:
+                        chrome_process, cdp_url = self._launch_native_chrome(url, visible=interactive)
+                    deadline = time.monotonic() + 25
+                    last_error = None
+                    while time.monotonic() < deadline and not self._login_cancel.is_set():
+                        try:
+                            browser = playwright.chromium.connect_over_cdp(cdp_url, timeout=3000)
+                            context = browser.contexts[0] if browser.contexts else None
+                        except Exception as exc:
+                            last_error, context = exc, None
+                        if context:
+                            break
+                        time.sleep(.35)
+                    if not context:
+                        raise RuntimeError(f"软件无法连接到 Chrome：{last_error or '连接超时'}")
+                    self._inject_cookies(context)
                     if interactive:
                         self._verification_status.update(stage="opened", message="验证窗口已打开，请完成安全验证")
                         self._verification_started.set()
@@ -1234,6 +1277,8 @@ class Api:
                     if browser:
                         try: browser.close()
                         except Exception: pass
+                    # CDP teardown leaves Chrome running; this one is ours to stop.
+                    self._stop_process(chrome_process)
         except Exception:
             merge_api_items()
             if interactive and not self._window_gone(page):
