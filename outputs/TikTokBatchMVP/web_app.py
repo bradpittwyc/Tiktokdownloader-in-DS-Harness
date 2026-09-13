@@ -125,6 +125,9 @@ class Api:
         self._collection_complete = False
         self._collection_needs_verification = False
         self._collection_window_closed = False
+        self._collection_cancelled = False
+        self._collect_cancel = threading.Event()
+        self._collect_process = None
         self._verified_cookies = []
         self._login_cancel = threading.Event()
         self._login_busy = False
@@ -489,6 +492,20 @@ class Api:
             self._emit("cookieStatus", self.get_cookie_status())
             self._emit("verificationStatus", self._verification_status)
 
+    def cancel_collect(self):
+        """Stop the collection that is running right now.
+
+        The scraping loop notices within about a second; the Chrome we opened is
+        torn down on a helper thread so this bridge call returns immediately and
+        the button does not look stuck. What was already collected is kept.
+        """
+        self._collect_cancel.set()
+        process = self._collect_process
+        log_event(f"收到取消抓取请求（后台 Chrome 进程={'有' if process else '无'}）")
+        if process is not None:
+            threading.Thread(target=self._stop_process, args=(process,), daemon=True).start()
+        return {"ok": True}
+
     def _close_login_browser(self, timeout=15):
         """Stop the verification Chrome and wait for the profile lock to clear."""
         self._stop_process(self._login_process, timeout)
@@ -766,6 +783,7 @@ class Api:
                                        "type": extra[2] if len(extra) > 2 else "video"})
             return {"ok": True, "complete": self._collection_complete, "warning": self._collection_warning,
                     "needsVerification": self._collection_needs_verification,
+                    "cancelled": self._collection_cancelled,
                     "username": username, "avatar": self._profile_avatar, "profileStats": self._profile_stats, "videos": normalized}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -1129,6 +1147,8 @@ class Api:
         self._collection_complete = False
         self._collection_needs_verification = False
         self._collection_window_closed = False
+        self._collection_cancelled = False
+        self._collect_cancel.clear()
         username_match = re.search(r"/@([^/?]+)", url)
         username = username_match.group(1) if username_match else ""
         archive = self._load_profile_archive(username)
@@ -1183,9 +1203,11 @@ class Api:
                 try:
                     if not cdp_url:
                         chrome_process, cdp_url = self._launch_native_chrome(url, visible=interactive)
+                        self._collect_process = chrome_process
                     deadline = time.monotonic() + 25
                     last_error = None
-                    while time.monotonic() < deadline and not self._login_cancel.is_set():
+                    while (time.monotonic() < deadline and not self._login_cancel.is_set()
+                           and not self._collect_cancel.is_set()):
                         try:
                             browser = playwright.chromium.connect_over_cdp(cdp_url, timeout=3000)
                             context = browser.contexts[0] if browser.contexts else None
@@ -1214,6 +1236,11 @@ class Api:
                     last_growth, previous, previous_revision = time.monotonic(), -1, -1
                     retries, last_continuation = {}, 0.0
                     while True:
+                        if self._collect_cancel.is_set():
+                            self._collection_cancelled = True
+                            self._collection_warning = "已取消抓取，已抓到的内容都已保留。"
+                            log_event(f"@{username} 抓取被用户取消（已抓 {len(found)} 条）")
+                            break
                         if self._window_gone(page):
                             self._collection_window_closed = True
                             self._collection_warning = f"验证窗口已关闭，已抓到的 {len(found)} 条已保留。"
@@ -1230,7 +1257,9 @@ class Api:
                             if interactive:
                                 self._emit("setStatus", "请在打开的 TikTok 窗口完成安全验证…")
                                 deadline = time.monotonic() + 900
-                                while challenge and time.monotonic() < deadline and not self._login_cancel.is_set():
+                                while (challenge and time.monotonic() < deadline
+                                       and not self._login_cancel.is_set()
+                                       and not self._collect_cancel.is_set()):
                                     if page.is_closed():
                                         break
                                     page.wait_for_timeout(1000)
@@ -1241,6 +1270,10 @@ class Api:
                                     # the run up again in a background browser.
                                     self._collection_window_closed = True
                                     self._collection_warning = f"验证窗口已关闭，已抓到的 {len(found)} 条已保留。"
+                                    break
+                                if self._collect_cancel.is_set():
+                                    self._collection_cancelled = True
+                                    self._collection_warning = "已取消抓取，已抓到的内容都已保留。"
                                     break
                                 if self._login_cancel.is_set():
                                     raise RuntimeError("已取消验证")
@@ -1317,11 +1350,17 @@ class Api:
                         except Exception: pass
                     # CDP teardown leaves Chrome running; this one is ours to stop.
                     self._stop_process(chrome_process)
+                    self._collect_process = None
         except Exception:
             merge_api_items()
-            if interactive and not self._window_gone(page):
+            if self._collect_cancel.is_set():
+                # A user pressing 暂停抓取 is not a failure: keep the batch and
+                # report it plainly instead of surfacing a browser error.
+                self._collection_cancelled = True
+                self._collection_warning = "已取消抓取，已抓到的内容都已保留。"
+            elif interactive and not self._window_gone(page):
                 raise
-            if interactive:
+            elif interactive:
                 # Teardown raced the user closing the window; keep what we have.
                 self._collection_window_closed = True
                 self._collection_warning = f"验证窗口已关闭，已抓到的 {len(found)} 条已保留。"
@@ -1333,12 +1372,13 @@ class Api:
             if acquired_here:
                 self._profile_lock.release()
         if (not found and not self._collection_complete and not self._collection_needs_verification
-                and not self._collection_window_closed):
+                and not self._collection_window_closed and not self._collection_cancelled):
             log_event(f"@{username} 抓取失败: {self._collection_warning or '没有返回可读取的作品'}")
             raise RuntimeError(self._collection_warning or "TikTok 没有返回可读取的作品，尚未抓完。")
         log_event(f"@{username} 抓取收尾: {len(found)} 条, complete={self._collection_complete}, "
                   f"needsVerification={self._collection_needs_verification}, "
-                  f"windowClosed={self._collection_window_closed}, warning={self._collection_warning!r}")
+                  f"windowClosed={self._collection_window_closed}, "
+                  f"cancelled={self._collection_cancelled}, warning={self._collection_warning!r}")
         return list(found.values())
 
     def enrich(self, videos):
