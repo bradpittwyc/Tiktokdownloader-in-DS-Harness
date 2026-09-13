@@ -65,6 +65,24 @@ def quality_format(quality):
     return f"best[{NO_WATERMARK}]/best"                       # 最佳画质
 
 
+# Text TikTok paints into the challenge frame. Checked across every frame
+# because the slider lives in an injected iframe, not the top document.
+CHALLENGE_MARKERS = ("drag the slider to fit the puzzle", "verify to continue",
+                     "拖动滑块", "完成下方验证")
+
+
+def page_challenged(page):
+    """True while TikTok is showing an unsolved security check."""
+    for frame in page.frames:
+        try:
+            text = frame.locator("body").inner_text(timeout=800).lower()
+        except Exception:
+            continue
+        if any(marker in text for marker in CHALLENGE_MARKERS):
+            return True
+    return False
+
+
 class Api:
     def __init__(self):
         self._window = None
@@ -88,6 +106,7 @@ class Api:
         self._collection_warning = ""
         self._collection_complete = False
         self._collection_needs_verification = False
+        self._collection_window_closed = False
         self._login_cancel = threading.Event()
         self._login_busy = False
         self._login_process = None
@@ -354,7 +373,7 @@ class Api:
         self._login_cancel.clear()
         self._verification_started.clear()
         self._verification_status = {"busy": True, "username": username,
-                                     "message": "请完成验证并保持窗口打开，软件会在同一窗口继续抓取"}
+                                     "message": "请完成验证，之后可以直接关闭该窗口"}
         try:
             login_profile = self._login_profile_dir()
             login_profile.mkdir(parents=True, exist_ok=True)
@@ -386,20 +405,45 @@ class Api:
         return dict(self._verification_status)
 
     def _verify_profile_worker(self, username, debug_port):
-        """Keep the challenged page visible and continue collecting in that session."""
+        """Solve the challenge in a visible window, then keep collecting without it."""
         error = ""
         result = None
+        url = f"https://www.tiktok.com/@{username}"
         try:
             # Do not call evaluate_js here. This worker can start before the
             # verify_profile bridge call has returned; a synchronous callback
             # at that point deadlocks pywebview and Chrome is never launched.
             self._verification_status.update(stage="starting", message="正在打开 TikTok 验证窗口…")
-            videos = self._collect_videos(f"https://www.tiktok.com/@{username}", interactive=True,
-                                          lock_held=True, cdp_url=f"http://127.0.0.1:{debug_port}")
+            try:
+                videos = self._collect_videos(url, interactive=True,
+                                              lock_held=True, cdp_url=f"http://127.0.0.1:{debug_port}")
+            except Exception:
+                if not self._collection_window_closed:
+                    raise
+                videos = []
+            if self._collection_window_closed and not self._collection_complete:
+                # The window is gone but the history is not complete. The profile
+                # now carries whatever verification produced, so finish the job
+                # in a background browser the user never has to babysit.
+                self._verification_status.update(stage="handoff",
+                                                 message="验证窗口已关闭，正在后台继续抓取…")
+                self._emit("setStatus", "验证窗口已关闭，正在后台继续抓取…")
+                self._close_login_browser()
+                try:
+                    # Append rather than replace: _store_profile_archive merges by
+                    # id, so the visible run's items survive even if the hand-off
+                    # returns a different (or empty) batch.
+                    videos = videos + self._collect_videos(url, lock_held=True)
+                except Exception as exc:
+                    # The visible window already fed the archive batch by batch,
+                    # so a failed hand-off must not discard that progress.
+                    self._collection_warning = f"后台继续抓取失败：{exc}"
+                    self._emit("setStatus", self._collection_warning)
             result = self._store_profile_archive(username, videos, self._collection_complete)
         except Exception as exc:
             error = str(exc)
         finally:
+            self._close_login_browser()
             self._login_busy = False
             self._login_process = None
             self._profile_lock.release()
@@ -410,6 +454,30 @@ class Api:
             self._verification_started.set()
             self._emit("cookieStatus", self.get_cookie_status())
             self._emit("verificationStatus", self._verification_status)
+
+    def _close_login_browser(self, timeout=15):
+        """Stop the verification Chrome and wait for the profile lock to clear.
+
+        browser.close() only drops the CDP connection; the process survives and
+        keeps holding the user-data-dir, so a follow-up launch would fail.
+        """
+        process = self._login_process
+        if process is None or process.poll() is not None:
+            return
+        try:
+            process.terminate()
+        except Exception:
+            return
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                return
+            time.sleep(.25)
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except Exception:
+            pass
 
     def cancel_tiktok_login(self):
         self._login_cancel.set()
@@ -892,6 +960,33 @@ class Api:
             browser.close()
             raise
 
+    def _snapshot_live_cookies(self, context):
+        """Persist the live browser session so a later headless pass can resume it."""
+        if self._cookie_browser != "saved" or self._cookie_file:
+            return
+        try:
+            cookies = tiktok_cookies(context.cookies())
+        except Exception:
+            return
+        if not has_session(cookies):
+            return
+        try:
+            with self._cookie_lock:
+                self._session_store.save(cookies, self._session_user_agent)
+                self._cookie_snapshot = cookies
+        except Exception:
+            pass
+
+    @staticmethod
+    def _window_gone(page):
+        """A CDP-attached page reports closed once its window is shut."""
+        if page is None:
+            return False
+        try:
+            return page.is_closed()
+        except Exception:
+            return False
+
     def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None):
         from profile_pagination import ProfilePagination
 
@@ -900,13 +995,14 @@ class Api:
         self._collection_warning = ""
         self._collection_complete = False
         self._collection_needs_verification = False
+        self._collection_window_closed = False
         username_match = re.search(r"/@([^/?]+)", url)
         username = username_match.group(1) if username_match else ""
         archive = self._load_profile_archive(username)
         known_ids = {str(row.get("id")) for row in archive.get("videos", []) if isinstance(row, dict)}
         incremental = bool(archive.get("history_complete"))
         found, pagination = {}, ProfilePagination(username)
-        browser = context = None
+        browser = context = page = None
 
         def merge_api_items():
             for ident, item in pagination.items.items():
@@ -965,7 +1061,7 @@ class Api:
                     else:
                         browser, context = self._browser_context(playwright, reuse_login=True, headless=not interactive)
                     if interactive:
-                        self._verification_status.update(stage="opened", message="验证窗口已打开，请完成验证并保持窗口打开")
+                        self._verification_status.update(stage="opened", message="验证窗口已打开，请完成安全验证")
                         self._verification_started.set()
                     page = context.pages[0] if context.pages else context.new_page()
                     page.on("response", collect_response)
@@ -981,6 +1077,10 @@ class Api:
                     last_growth, previous, previous_revision = time.monotonic(), -1, -1
                     retries, last_continuation = {}, 0.0
                     while True:
+                        if self._window_gone(page):
+                            self._collection_window_closed = True
+                            self._collection_warning = f"验证窗口已关闭，已抓到的 {len(found)} 条已保留。"
+                            break
                         rows = page.locator('a[href*="/video/"], a[href*="/photo/"]').evaluate_all("""els=>els.map(e=>{const c=e.closest('[data-e2e="user-post-item"]')||e.parentElement;const i=e.querySelector('img')||(c&&c.querySelector('img'));const v=c&&c.querySelector('[data-e2e="video-views"]');return {url:e.href.split('?')[0],title:e.getAttribute('aria-label')||(i&&i.alt)||e.innerText||'',cover:i?(i.currentSrc||i.src):'',views:v?v.textContent.trim():null}})""")
                         for row in rows:
                             match = re.search(r"/(?:video|photo)/(\d+)", row.get("url", ""))
@@ -988,41 +1088,37 @@ class Api:
                                 title = " ".join((row.get("title") or "").split()) or f"作品 {match.group(1)}"
                                 found[match.group(1)] = {"id": match.group(1), "url": row["url"], "title": title[:160], "cover": row.get("cover") or "", "views": row.get("views"), "type": "image" if "/photo/" in row.get("url", "") else "video"}
                         merge_api_items()
-                        challenge = False
-                        for frame in page.frames:
-                            try:
-                                text = frame.locator('body').inner_text(timeout=800).lower()
-                                if any(message in text for message in ("drag the slider to fit the puzzle", "verify to continue", "拖动滑块", "完成下方验证")):
-                                    challenge = True
-                                    break
-                            except Exception:
-                                continue
+                        challenge = page_challenged(page)
                         if challenge:
                             if interactive:
                                 self._emit("setStatus", "请在打开的 TikTok 窗口完成安全验证…")
                                 deadline = time.monotonic() + 900
                                 while challenge and time.monotonic() < deadline and not self._login_cancel.is_set():
                                     if page.is_closed():
-                                        raise RuntimeError("验证窗口已关闭。请重新打开验证窗口，完成验证后保持窗口打开，软件会自动继续抓取。")
+                                        break
                                     page.wait_for_timeout(1000)
-                                    challenge = False
-                                    for frame in page.frames:
-                                        try:
-                                            text = frame.locator('body').inner_text(timeout=800).lower()
-                                            if any(message in text for message in ("drag the slider to fit the puzzle", "verify to continue", "拖动滑块", "完成下方验证")):
-                                                challenge = True
-                                                break
-                                        except Exception:
-                                            continue
+                                    challenge = page_challenged(page)
+                                if self._window_gone(page):
+                                    # The user closed the window instead of leaving
+                                    # it open. Stop cleanly here; the caller picks
+                                    # the run up again in a background browser.
+                                    self._collection_window_closed = True
+                                    self._collection_warning = f"验证窗口已关闭，已抓到的 {len(found)} 条已保留。"
+                                    break
                                 if self._login_cancel.is_set():
                                     raise RuntimeError("已取消验证")
                                 if challenge:
                                     raise RuntimeError("等待 TikTok 验证超时")
+                                # Snapshot right away: the clearance cookie is often a
+                                # session cookie that never reaches disk, so waiting
+                                # until the run ends would lose it.
+                                self._snapshot_live_cookies(context)
                                 last_growth = time.monotonic()
+                                self._emit("setStatus", "验证已通过，可以关闭这个窗口，软件会在后台继续抓取")
                                 continue
                             self._collection_needs_verification = True
                             self._verification_username = username
-                            self._collection_warning = "TikTok 要求安全验证，已有作品已保留。点击“打开验证窗口”，在博主主页完成验证并关闭窗口后自动继续。"
+                            self._collection_warning = "TikTok 要求安全验证，已有作品已保留。点击“打开验证窗口”完成验证；通过后可以直接关闭该窗口，软件会在后台继续抓取。"
                             break
                         if pagination.refused:
                             self._collection_warning = pagination.error + "；已保留已有作品，尚未抓完。"
@@ -1075,15 +1171,7 @@ class Api:
                         page.wait_for_timeout(1200)
                 finally:
                     if context:
-                        if self._cookie_browser == "saved" and not self._cookie_file:
-                            try:
-                                fresh_cookies = tiktok_cookies(context.cookies())
-                                if has_session(fresh_cookies):
-                                    with self._cookie_lock:
-                                        self._session_store.save(fresh_cookies, self._session_user_agent)
-                                        self._cookie_snapshot = fresh_cookies
-                            except Exception:
-                                pass
+                        self._snapshot_live_cookies(context)
                         try: context.close()
                         except Exception: pass
                     if browser:
@@ -1091,17 +1179,24 @@ class Api:
                         except Exception: pass
         except Exception:
             merge_api_items()
+            if interactive and not self._window_gone(page):
+                raise
             if interactive:
+                # Teardown raced the user closing the window; keep what we have.
+                self._collection_window_closed = True
+                self._collection_warning = f"验证窗口已关闭，已抓到的 {len(found)} 条已保留。"
+            elif not found:
                 raise
-            if not found:
-                raise
-            self._collection_warning = "读取连接中断，已保留已有作品；尚未抓完。"
+            else:
+                self._collection_warning = "读取连接中断，已保留已有作品；尚未抓完。"
         finally:
             if acquired_here:
                 self._profile_lock.release()
-        if not found and not self._collection_complete and not self._collection_needs_verification:
+        if (not found and not self._collection_complete and not self._collection_needs_verification
+                and not self._collection_window_closed):
             raise RuntimeError(self._collection_warning or "TikTok 没有返回可读取的作品，尚未抓完。")
         return list(found.values())
+
     def enrich(self, videos):
         """Fill engagement metadata progressively; failures leave the fast list usable."""
         import yt_dlp
