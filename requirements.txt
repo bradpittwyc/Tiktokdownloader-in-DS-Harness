@@ -1,0 +1,16 @@
+# 运行所需（v1.0.0 实测版本写在注释里）
+pywebview>=6.0          # 6.2.1
+yt-dlp>=2025.1.1        # 2026.8.19
+curl_cffi>=0.7          # 0.16.3
+playwright>=1.40        # 1.62.0
+python-docx>=1.1        # 1.2.0
+requests>=2.31          # 2.33.1
+Pillow>=10.0            # 12.2.0
+
+# 打包所需（仅构建 EXE 时需要）
+# pyinstaller>=6.0       # 6.19.0
+
+# 说明
+# - 抓取复用本机已安装的 Chrome / Edge，因此不需要执行 `playwright install`
+#   下载 Playwright 自带的浏览器。
+# - 运行源码前请确认本机已安装 Chrome 或 Edge。

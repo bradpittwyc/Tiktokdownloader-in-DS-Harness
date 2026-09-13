@@ -20,6 +20,7 @@ UninstallDisplayIcon={app}\{#AppExeName}
 
 [Files]
 Source: "..\outputs\TikTokBatchMVP\TikTokBatchMVP.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\outputs\TikTokBatchMVP\README.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

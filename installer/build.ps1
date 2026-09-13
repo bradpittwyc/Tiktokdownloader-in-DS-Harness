@@ -59,8 +59,19 @@ for module, distribution in requirements.items():
 if missing:
     raise SystemExit("Build dependencies unavailable:\n" + "\n".join(missing))
 '@
-& $Python -c $dependencyCheck
-if ($LASTEXITCODE -ne 0) {
+# Write the check to a file and run it. Passing this via `python -c` lets
+# PowerShell strip the embedded double quotes, which turns the f-string into a
+# syntax error and makes the build report "missing build dependencies" even on a
+# fully provisioned interpreter. Observed exactly that on 2026-09-13.
+$dependencyCheckPath = Join-Path ([IO.Path]::GetTempPath()) "tiktokbatchmvp-deps-$PID.py"
+Set-Content -LiteralPath $dependencyCheckPath -Value $dependencyCheck -Encoding UTF8
+try {
+    & $Python $dependencyCheckPath
+    $dependencyExit = $LASTEXITCODE
+} finally {
+    Remove-Item -LiteralPath $dependencyCheckPath -Force -ErrorAction SilentlyContinue
+}
+if ($dependencyExit -ne 0) {
     throw "The selected Python environment is missing build dependencies."
 }
 
