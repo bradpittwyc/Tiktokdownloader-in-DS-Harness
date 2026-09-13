@@ -91,7 +91,10 @@ class OpenProfileTests(unittest.TestCase):
         result = self.api.open_profile("https://www.tiktok.com/@owner")
         self.assertTrue(result["ok"], "上次没抓完不代表不能打开")
         self.assertFalse(result["complete"])
-        self.assertIn("重新抓取", result["warning"])
+        # 提示语指向后台的「继续抓取」，而不是阻塞式的「重新抓取」
+        self.assertIn("继续抓取", result["warning"])
+        self.assertIn("后台", result["warning"])
+        self.assertNotIn("重新抓取", result["warning"])
         self.assertIn("本地记录", result["message"])
 
     def test_complete_archive_has_nothing_to_warn_about(self):

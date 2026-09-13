@@ -152,6 +152,7 @@ class Api:
         self._collection_cancelled = False
         self._collect_cancel = threading.Event()
         self._collect_process = None
+        self._background_collect_lock = threading.Lock()
         self._verified_cookies = []
         self._login_cancel = threading.Event()
         self._login_busy = False
@@ -516,6 +517,51 @@ class Api:
             self._emit("cookieStatus", self.get_cookie_status())
             self._emit("verificationStatus", self._verification_status)
 
+    def continue_collect(self, raw_url):
+        """Finish a creator's archive in the background; never blocks the UI.
+
+        Unlike recognize(), this returns immediately. Progress reaches the page
+        through the archiveUpdate events that _store_profile_archive already
+        emits, so browsing, selecting and downloading keep working untouched.
+        """
+        try:
+            url = clean_profile_url(raw_url)
+        except Exception:
+            return {"ok": False, "error": "请输入 TikTok 博主主页链接"}
+        match = re.search(r"/@([^/?]+)", url)
+        username = match.group(1) if match else ""
+        if not username:
+            return {"ok": False, "error": "无法识别博主用户名"}
+        if not self._background_collect_lock.acquire(blocking=False):
+            return {"ok": False, "busy": True, "error": "后台已经在继续抓取，请稍候"}
+        if not self._profile_lock.acquire(blocking=False):
+            self._background_collect_lock.release()
+            return {"ok": False, "busy": True, "error": "抓取或登录正在进行，等这次结束后再试"}
+        log_event(f"@{username} 开始后台继续抓取")
+        self._emit("backgroundCollect", {"username": username, "running": True})
+        threading.Thread(target=self._continue_collect_worker, args=(url, username),
+                         daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def _continue_collect_worker(self, url, username):
+        try:
+            videos = self._collect_videos(url, lock_held=True)
+            result = self._store_profile_archive(username, videos, self._collection_complete)
+            log_event(f"@{username} 后台继续抓取结束: {len(result['videos'])} 条, "
+                      f"complete={result['complete']}, warning={self._collection_warning!r}")
+            self._emit("backgroundCollect", {"username": username, "running": False,
+                                             "complete": result["complete"],
+                                             "count": len(result["videos"]),
+                                             "needsVerification": result["needsVerification"],
+                                             "warning": self._collection_warning})
+        except Exception as exc:
+            log_event(f"@{username} 后台继续抓取失败: {exc}")
+            self._emit("backgroundCollect", {"username": username, "running": False,
+                                             "error": str(exc)})
+        finally:
+            self._background_collect_lock.release()
+            self._profile_lock.release()
+
     def cancel_collect(self):
         """Stop the collection that is running right now.
 
@@ -861,7 +907,7 @@ class Api:
         stamp = time.strftime("%m-%d %H:%M", time.localtime(last_sync)) if last_sync else "时间未知"
         log_event(f"打开本地记录 @{username}: {len(videos)} 条, "
                   f"完整={self._collection_complete}, 最后更新={stamp}")
-        warning = "" if self._collection_complete else "本地记录上次没抓完，点「重新抓取」可以接着补齐。"
+        warning = "" if self._collection_complete else "本地记录上次没抓完，点「继续抓取」可以在后台接着补齐，不影响当前页面。"
         return {"ok": True, "cached": True, "complete": self._collection_complete,
                 "warning": warning, "needsVerification": False,
                 "username": username, "avatar": self._profile_avatar,
@@ -1227,7 +1273,7 @@ class Api:
         acquired_here = False
         if not lock_held:
             if not self._profile_lock.acquire(blocking=False):
-                raise RuntimeError("登录或验证窗口正在使用浏览器，请完成后关闭该窗口再继续")
+                raise RuntimeError("另一个抓取或登录正在使用浏览器，请等它结束后再试")
             acquired_here = True
         try:
             if interactive:
