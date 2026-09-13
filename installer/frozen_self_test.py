@@ -17,6 +17,15 @@ if "--self-test" in sys.argv:
     if argument_index + 1 >= len(sys.argv):
         raise SystemExit(2)
     report_path = Path(sys.argv[argument_index + 1]).resolve()
+    # The build knows which version it is producing; the bundle has to agree.
+    # Passing it in turns "VERSION got left out of the package" into a build
+    # failure instead of an app that silently reports 0.0.0 forever.
+    expected_version = None
+    if "--expect-version" in sys.argv:
+        version_index = sys.argv.index("--expect-version")
+        if version_index + 1 >= len(sys.argv):
+            raise SystemExit(2)
+        expected_version = sys.argv[version_index + 1].strip()
     asset_root = (
         Path(sys._MEIPASS)
         if getattr(sys, "frozen", False)
@@ -50,8 +59,18 @@ if "--self-test" in sys.argv:
     ):
         check(f"import:{module_name}", lambda name=module_name: importlib.import_module(name).__name__)
 
-    for relative_path in ("ui/index.html", "ui/blank.html", "ui/tiktok-logo.png"):
+    for relative_path in ("ui/index.html", "ui/blank.html", "ui/tiktok-logo.png", "VERSION"):
         check(f"asset:{relative_path}", lambda relative=relative_path: require_file(asset_root / relative))
+
+    def check_bundled_version():
+        bundled = (asset_root / "VERSION").read_text(encoding="utf-8").strip()
+        if not bundled or not bundled[0].isdigit():
+            raise ValueError(f"Bundled VERSION is not a version number: {bundled!r}")
+        if expected_version and bundled != expected_version:
+            raise ValueError(f"Bundled VERSION is {bundled!r} but this build produces {expected_version!r}")
+        return f"{bundled} (matches build)" if expected_version else bundled
+
+    check("version:matches-build", check_bundled_version)
 
     def check_playwright_driver():
         from playwright._impl._driver import compute_driver_executable

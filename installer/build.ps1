@@ -106,7 +106,7 @@ Write-Host "SHA256: $($digest.Hash)"
 # Exercise the bundled modules, driver, templates and UI assets without opening
 # the application, loading user preferences or making any network requests.
 $reportPath = Join-Path $buildRoot "self-test.json"
-$testProcess = Start-Process -FilePath $exePath -ArgumentList @("--self-test", "`"$reportPath`"") -WindowStyle Hidden -PassThru
+$testProcess = Start-Process -FilePath $exePath -ArgumentList @("--self-test", "`"$reportPath`"", "--expect-version", "$version") -WindowStyle Hidden -PassThru
 if (-not $testProcess.WaitForExit(60000)) {
     Stop-Process -Id $testProcess.Id -ErrorAction SilentlyContinue
     throw "Bundled dependency self-test timed out after 60 seconds."
