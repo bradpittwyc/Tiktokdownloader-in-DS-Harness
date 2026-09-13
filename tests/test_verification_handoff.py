@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "outputs/TikTokBatchMVP"))
 from web_app import Api, CHALLENGE_MARKERS, page_challenged
@@ -190,10 +190,12 @@ class SnapshotLiveCookiesTests(unittest.TestCase):
         self.assertTrue(self.api._session_store.path.exists())
         self.assertEqual([c["name"] for c in self.api._cookie_snapshot], ["sessionid"])
 
-    def test_skips_when_the_cookie_source_is_not_the_saved_session(self):
+    def test_skips_persisting_when_the_cookie_source_is_not_the_saved_session(self):
+        # Still remembered in memory, just not written to the DPAPI file.
         self.api._cookie_browser = "chrome"
         self.api._snapshot_live_cookies(FakeContext([tiktok_session()]))
         self.assertFalse(self.api._session_store.path.exists())
+        self.assertEqual([c["name"] for c in self.api._verified_cookies], ["sessionid"])
 
     def test_skips_when_a_cookie_file_is_in_use(self):
         self.api._cookie_file = "cookies.txt"
@@ -208,6 +210,71 @@ class SnapshotLiveCookiesTests(unittest.TestCase):
     def test_context_without_a_login_is_not_persisted(self):
         self.api._snapshot_live_cookies(FakeContext([tiktok_session("ttwid")]))
         self.assertFalse(self.api._session_store.path.exists())
+
+
+class VerifiedProfileTests(unittest.TestCase):
+    """验证过的 profile 必须被复用 —— 这是关窗后还能继续抓的前提。
+
+    真机现场：用户 cookie 来源不是「软件保存的登录态」，而 verify_profile
+    永远开的是 app 自有 profile（实测该 profile 是完整登录态：sessionid /
+    sid_guard / tt_chain_token 等 31 条）。交接时若不强制回到它，
+    就等于另开一个 TikTok 从没放行过的浏览器，必然又被挑战。
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.env = patch.dict(os.environ, {"LOCALAPPDATA": self.temp.name})
+        self.env.start()
+        self.api = Api()
+        # 绕开真实浏览器 cookie 提取：直接给一份内存快照
+        self.api._cookie_browser = "chrome"
+        self.api._cookie_loaded = True
+        self.api._cookie_snapshot = [tiktok_session()]
+
+    def tearDown(self):
+        self.env.stop()
+        self.temp.cleanup()
+
+    def fake_playwright(self, profile_cookies):
+        context = Mock()
+        context.cookies.return_value = list(profile_cookies)
+        playwright = Mock()
+        playwright.chromium.launch_persistent_context.return_value = context
+        return playwright, context
+
+    def test_force_profile_wins_over_the_cookie_source(self):
+        playwright, context = self.fake_playwright([])
+        browser, ctx = self.api._browser_context(playwright, reuse_login=True,
+                                                 headless=True, force_profile=True)
+        self.assertIsNone(browser)
+        self.assertIs(ctx, context)
+        playwright.chromium.launch_persistent_context.assert_called_once()
+        playwright.chromium.launch.assert_not_called()
+
+    def test_without_force_a_non_saved_source_still_uses_a_fresh_browser(self):
+        # 普通抓取路径不受影响：来源不是 saved 时照旧开新浏览器。
+        playwright, context = self.fake_playwright([])
+        self.api._browser_context(playwright, reuse_login=True,
+                                  headless=True, force_profile=False)
+        playwright.chromium.launch_persistent_context.assert_not_called()
+        playwright.chromium.launch.assert_called_once()
+
+    def test_restores_missing_cookies_even_when_the_session_survived(self):
+        # 回归：以前只在 has_session 为假时才补 cookie，于是
+        # 「sessionid 还在、验证 clearance 掉了」这种情况永远补不回来。
+        self.api._verified_cookies = [tiktok_session("tt_csrf_token", "SOLVED")]
+        playwright, context = self.fake_playwright([tiktok_session()])
+        self.api._browser_context(playwright, reuse_login=True, headless=True,
+                                  force_profile=True)
+        added = context.add_cookies.call_args[0][0]
+        self.assertEqual([c["name"] for c in added], ["tt_csrf_token"])
+
+    def test_cookies_the_profile_already_has_are_not_rewritten(self):
+        self.api._verified_cookies = [tiktok_session("sessionid", "FRESH")]
+        playwright, context = self.fake_playwright([tiktok_session("sessionid", "IN-PROFILE")])
+        self.api._browser_context(playwright, reuse_login=True, headless=True,
+                                  force_profile=True)
+        context.add_cookies.assert_not_called()
 
 
 class VerifyWorkerHandoffTests(unittest.TestCase):
@@ -234,8 +301,9 @@ class VerifyWorkerHandoffTests(unittest.TestCase):
         return self.api._verification_status
 
     def test_closing_the_window_continues_in_a_background_pass(self):
-        def collect(url, interactive=False, lock_held=False, cdp_url=None):
-            self.calls.append({"interactive": interactive, "cdp_url": cdp_url})
+        def collect(url, interactive=False, lock_held=False, cdp_url=None, force_profile=False):
+            self.calls.append({"interactive": interactive, "cdp_url": cdp_url,
+                               "force_profile": force_profile})
             if interactive:
                 self.api._collection_window_closed = True
                 self.api._collection_warning = "验证窗口已关闭"
@@ -249,6 +317,9 @@ class VerifyWorkerHandoffTests(unittest.TestCase):
         self.assertTrue(self.calls[0]["interactive"])
         self.assertIsNone(self.calls[1]["cdp_url"], "第二遍不能再用 CDP 挂可见窗口")
         self.assertFalse(self.calls[1]["interactive"])
+        self.assertFalse(self.calls[0]["force_profile"], "可见窗口阶段不该强制 profile")
+        self.assertTrue(self.calls[1]["force_profile"],
+                        "后台那遍必须回到验证过的 profile，否则验证等于白做")
         self.assertTrue(status["ready"])
         archive = self.api._load_profile_archive("owner")
         self.assertEqual({v["id"] for v in archive["videos"]}, {"1", "2", "3"},
@@ -258,7 +329,7 @@ class VerifyWorkerHandoffTests(unittest.TestCase):
     def test_teardown_error_after_close_still_hands_off(self):
         # Closing the window makes Playwright throw mid-evaluate; that is not a
         # failure, it is the hand-off trigger.
-        def collect(url, interactive=False, lock_held=False, cdp_url=None):
+        def collect(url, interactive=False, lock_held=False, cdp_url=None, force_profile=False):
             self.calls.append(interactive)
             if interactive:
                 self.api._collection_window_closed = True
@@ -274,7 +345,7 @@ class VerifyWorkerHandoffTests(unittest.TestCase):
         self.assertEqual([v["id"] for v in self.api._load_profile_archive("owner")["videos"]], ["9"])
 
     def test_real_failure_is_still_reported_and_not_retried(self):
-        def collect(url, interactive=False, lock_held=False, cdp_url=None):
+        def collect(url, interactive=False, lock_held=False, cdp_url=None, force_profile=False):
             self.calls.append(interactive)
             raise RuntimeError("等待 TikTok 验证超时")
 
@@ -285,7 +356,7 @@ class VerifyWorkerHandoffTests(unittest.TestCase):
         self.assertIn("超时", status["error"])
 
     def test_completed_visible_run_does_not_start_a_second_pass(self):
-        def collect(url, interactive=False, lock_held=False, cdp_url=None):
+        def collect(url, interactive=False, lock_held=False, cdp_url=None, force_profile=False):
             self.calls.append(interactive)
             self.api._collection_complete = True
             return [{"id": "1", "title": "a"}]
@@ -296,7 +367,7 @@ class VerifyWorkerHandoffTests(unittest.TestCase):
         self.assertTrue(status["ready"])
 
     def test_failed_handoff_keeps_the_archive_from_the_visible_run(self):
-        def collect(url, interactive=False, lock_held=False, cdp_url=None):
+        def collect(url, interactive=False, lock_held=False, cdp_url=None, force_profile=False):
             self.calls.append(interactive)
             if interactive:
                 self.api._collection_window_closed = True

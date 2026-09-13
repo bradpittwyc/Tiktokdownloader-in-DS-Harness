@@ -83,6 +83,24 @@ def page_challenged(page):
     return False
 
 
+def log_event(message):
+    """Append a timestamped line to the on-disk diagnostic log.
+
+    The GUI runs under pythonw with no console, so a collection that quietly
+    falls back or fails leaves no trace at all. Keep this dependency-free.
+    """
+    try:
+        path = (Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+                / "TikTokBatchMVP" / "logs" / "scrape.log")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 2_000_000:
+            path.unlink()
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+    except Exception:
+        pass
+
+
 class Api:
     def __init__(self):
         self._window = None
@@ -107,6 +125,7 @@ class Api:
         self._collection_complete = False
         self._collection_needs_verification = False
         self._collection_window_closed = False
+        self._verified_cookies = []
         self._login_cancel = threading.Event()
         self._login_busy = False
         self._login_process = None
@@ -414,6 +433,9 @@ class Api:
             # verify_profile bridge call has returned; a synchronous callback
             # at that point deadlocks pywebview and Chrome is never launched.
             self._verification_status.update(stage="starting", message="正在打开 TikTok 验证窗口…")
+            self._verified_cookies = []
+            log_event(f"[{username}] 打开验证窗口，cookie 来源={self._cookie_browser or '匿名'}"
+                      f"{'/文件' if self._cookie_file else ''}")
             try:
                 videos = self._collect_videos(url, interactive=True,
                                               lock_held=True, cdp_url=f"http://127.0.0.1:{debug_port}")
@@ -421,6 +443,9 @@ class Api:
                 if not self._collection_window_closed:
                     raise
                 videos = []
+            log_event(f"[{username}] 可见窗口阶段结束: 抓到 {len(videos)} 条, "
+                      f"完整={self._collection_complete}, 关窗={self._collection_window_closed}, "
+                      f"需要验证={self._collection_needs_verification}, warning={self._collection_warning!r}")
             if self._collection_window_closed and not self._collection_complete:
                 # The window is gone but the history is not complete. The profile
                 # now carries whatever verification produced, so finish the job
@@ -432,16 +457,27 @@ class Api:
                 try:
                     # Append rather than replace: _store_profile_archive merges by
                     # id, so the visible run's items survive even if the hand-off
-                    # returns a different (or empty) batch.
-                    videos = videos + self._collect_videos(url, lock_held=True)
+                    # returns a different (or empty) batch. force_profile is what
+                    # makes the hand-off land in the SAME verified profile; without
+                    # it the follow-up starts a browser TikTok never cleared.
+                    followup = self._collect_videos(url, lock_held=True, force_profile=True)
+                    log_event(f"[{username}] 后台接手结束: 抓到 {len(followup)} 条, "
+                              f"完整={self._collection_complete}, "
+                              f"需要验证={self._collection_needs_verification}, "
+                              f"warning={self._collection_warning!r}")
+                    videos = videos + followup
                 except Exception as exc:
                     # The visible window already fed the archive batch by batch,
                     # so a failed hand-off must not discard that progress.
                     self._collection_warning = f"后台继续抓取失败：{exc}"
+                    log_event(f"[{username}] 后台接手失败: {exc}")
                     self._emit("setStatus", self._collection_warning)
             result = self._store_profile_archive(username, videos, self._collection_complete)
+            log_event(f"[{username}] 归档完成: 共 {len(result['videos'])} 条, "
+                      f"complete={result['complete']}, needsVerification={result['needsVerification']}")
         except Exception as exc:
             error = str(exc)
+            log_event(f"[{username}] 验证流程异常: {exc}")
         finally:
             self._close_login_browser()
             self._login_busy = False
@@ -923,9 +959,12 @@ class Api:
     def _login_profile_dir(self):
         return self._session_store.root / "login-browser"
 
-    def _browser_context(self, playwright, reuse_login=False, headless=True):
+    def _browser_context(self, playwright, reuse_login=False, headless=True, force_profile=False):
         cookies = self._require_cookies()
-        if reuse_login and self._cookie_browser == "saved" and not self._cookie_file:
+        # verify_profile ALWAYS opens the app-owned profile, so whatever the user
+        # solved lives there. Handing off to any other context throws the
+        # verification away and gets challenged again immediately.
+        if force_profile or (reuse_login and self._cookie_browser == "saved" and not self._cookie_file):
             # Use the exact Chrome profile where the user logged in / verified.
             # Copying cookies into a fresh context discards site storage and cache.
             context = playwright.chromium.launch_persistent_context(
@@ -933,13 +972,16 @@ class Api:
                 viewport={"width": 1280, "height": 900})
             try:
                 existing = tiktok_cookies(context.cookies())
-                if not has_session(existing):
-                    # Session cookies may be dropped by Chrome on normal shutdown.
-                    # Restore only missing cookies; preserve newer verification data.
-                    keys = {(c["domain"], c["path"], c["name"]) for c in existing}
-                    missing = [c for c in cookies if (c["domain"], c["path"], c["name"]) not in keys]
-                    if missing:
-                        context.add_cookies(missing)
+                # Restore every missing cookie, not only when the whole session
+                # vanished: a solved challenge is usually a session cookie that
+                # Chrome drops on shutdown, while sessionid may well survive.
+                keys = {(c["domain"], c["path"], c["name"]) for c in existing}
+                missing = [c for c in cookies + self._verified_cookies
+                           if (c["domain"], c["path"], c["name"]) not in keys]
+                if missing:
+                    context.add_cookies(missing)
+                    log_event(f"恢复 {len(missing)} 条 cookie 到登录 profile: "
+                              f"{sorted(c['name'] for c in missing)}")
                 return None, context
             except Exception:
                 context.close()
@@ -961,12 +1003,20 @@ class Api:
             raise
 
     def _snapshot_live_cookies(self, context):
-        """Persist the live browser session so a later headless pass can resume it."""
-        if self._cookie_browser != "saved" or self._cookie_file:
-            return
+        """Remember the live browser session so a later headless pass can resume it.
+
+        Always kept in memory; only persisted to DPAPI when the configured source
+        IS the saved session. Other sources (imported Chrome cookies, cookies.txt)
+        still need the solved challenge handed to the follow-up pass.
+        """
         try:
             cookies = tiktok_cookies(context.cookies())
         except Exception:
+            return
+        if not cookies:
+            return
+        self._verified_cookies = cookies
+        if self._cookie_browser != "saved" or self._cookie_file:
             return
         if not has_session(cookies):
             return
@@ -987,7 +1037,8 @@ class Api:
         except Exception:
             return False
 
-    def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None):
+    def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None,
+                        force_profile=False):
         from profile_pagination import ProfilePagination
 
         # Reject an invalid requested login source before Playwright starts.
@@ -1003,6 +1054,9 @@ class Api:
         incremental = bool(archive.get("history_complete"))
         found, pagination = {}, ProfilePagination(username)
         browser = context = page = None
+        log_event(f"抓取 @{username}: interactive={interactive}, force_profile={force_profile}, "
+                  f"cdp={'有' if cdp_url else '无'}, 存档 {len(known_ids)} 条, 增量={incremental}, "
+                  f"cookie来源={self._cookie_browser or '匿名'}")
 
         def merge_api_items():
             for ident, item in pagination.items.items():
@@ -1059,7 +1113,9 @@ class Api:
                         if not context:
                             raise RuntimeError(f"Chrome 已启动，但软件无法连接验证窗口：{last_error or '连接超时'}")
                     else:
-                        browser, context = self._browser_context(playwright, reuse_login=True, headless=not interactive)
+                        browser, context = self._browser_context(
+                            playwright, reuse_login=True, headless=not interactive,
+                            force_profile=force_profile)
                     if interactive:
                         self._verification_status.update(stage="opened", message="验证窗口已打开，请完成安全验证")
                         self._verification_started.set()
@@ -1118,6 +1174,7 @@ class Api:
                                 continue
                             self._collection_needs_verification = True
                             self._verification_username = username
+                            log_event(f"@{username} 后台抓取被要求安全验证（已有 {len(found)} 条）")
                             self._collection_warning = "TikTok 要求安全验证，已有作品已保留。点击“打开验证窗口”完成验证；通过后可以直接关闭该窗口，软件会在后台继续抓取。"
                             break
                         if pagination.refused:
@@ -1194,7 +1251,11 @@ class Api:
                 self._profile_lock.release()
         if (not found and not self._collection_complete and not self._collection_needs_verification
                 and not self._collection_window_closed):
+            log_event(f"@{username} 抓取失败: {self._collection_warning or '没有返回可读取的作品'}")
             raise RuntimeError(self._collection_warning or "TikTok 没有返回可读取的作品，尚未抓完。")
+        log_event(f"@{username} 抓取收尾: {len(found)} 条, complete={self._collection_complete}, "
+                  f"needsVerification={self._collection_needs_verification}, "
+                  f"windowClosed={self._collection_window_closed}, warning={self._collection_warning!r}")
         return list(found.values())
 
     def enrich(self, videos):
