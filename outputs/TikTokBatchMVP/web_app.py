@@ -1402,43 +1402,48 @@ class Api:
         options = {"quiet": True, "no_warnings": True, "skip_download": True,
                    "socket_timeout": 20, "retries": 1, "noplaylist": True}
         self._apply_cookie_options(options)
-        for index, item in enumerate(videos, 1):
-            if item.get("type") == "image" or "/photo/" in item.get("url", ""):
-                if not item.get("upload_date"):
-                    try:
-                        item["upload_date"] = time.strftime("%Y%m%d", time.localtime(int(item["id"]) >> 32))
-                    except Exception:
-                        pass
-                self._emit("metadataUpdate", item)
-                self._emit("metadataStatus", {"current": index, "total": len(videos)})
-                continue
-            if item.get("likes") is not None and item.get("upload_date"):
-                self._emit("metadataUpdate", item)
-                continue
-            try:
-                with self._youtube_dl(options) as ydl:
-                    info = ydl.extract_info(item["url"], download=False)
-                item.update({
-                    "title": info.get("description") or info.get("title") or item.get("title"),
-                    "likes": info.get("like_count"),
-                    "views": info.get("view_count") or item.get("views"),
-                    "comments": info.get("comment_count"),
-                    "upload_date": info.get("upload_date"),
-                    "cover": info.get("thumbnail") or item.get("cover", ""),
-                })
-                updated += 1
-                self._emit("metadataUpdate", item)
-                if updated % 5 == 0:
+        try:
+            for index, item in enumerate(videos, 1):
+                if item.get("type") == "image" or "/photo/" in item.get("url", ""):
+                    if not item.get("upload_date"):
+                        try:
+                            item["upload_date"] = time.strftime("%Y%m%d", time.localtime(int(item["id"]) >> 32))
+                        except Exception:
+                            pass
+                    self._emit("metadataUpdate", item)
+                    self._emit("metadataStatus", {"current": index, "total": len(videos)})
+                    continue
+                if item.get("likes") is not None and item.get("upload_date"):
+                    self._emit("metadataUpdate", item)
+                    continue
+                try:
+                    with self._youtube_dl(options) as ydl:
+                        info = ydl.extract_info(item["url"], download=False)
+                    item.update({
+                        "title": info.get("description") or info.get("title") or item.get("title"),
+                        "likes": info.get("like_count"),
+                        "views": info.get("view_count") or item.get("views"),
+                        "comments": info.get("comment_count"),
+                        "upload_date": info.get("upload_date"),
+                        "cover": info.get("thumbnail") or item.get("cover", ""),
+                    })
+                    updated += 1
+                    self._emit("metadataUpdate", item)
+                    if updated % 5 == 0:
+                        cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    pass
+                try:
+                    cache_file.parent.mkdir(parents=True, exist_ok=True)
                     cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
-            except Exception:
-                pass
-            try:
-                cache_file.parent.mkdir(parents=True, exist_ok=True)
-                cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
-            except Exception:
-                pass
-            self._emit("metadataStatus", {"current": index, "total": len(videos)})
-            time.sleep(0.2)
+                except Exception:
+                    pass
+                self._emit("metadataStatus", {"current": index, "total": len(videos)})
+                time.sleep(0.2)
+        finally:
+            # 进度提示必须有终点，否则状态栏会一直挂着"后台读取数据 N/M"。
+            # 放在 finally 里，抓取中途出错也不会留下这句残留。
+            self._emit("metadataStatus", {"done": True})
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
         return {"updated": updated}
