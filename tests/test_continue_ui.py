@@ -84,6 +84,19 @@ class ContinueCollectUITest(unittest.TestCase):
         self.page.locator(".recent-card").click()
         self.page.wait_for_function("!!document.getElementById('continueCollect')")
 
+    def click_continue(self):
+        """点「继续抓取」并等到提示条真的让开。"""
+        self.page.locator("#continueCollect").click()
+        self.page.wait_for_function("window.continueCalls.length===1")
+        self.page.wait_for_selector("#scrapeNotice", state="hidden")
+
+    def test_the_notice_hides_as_soon_as_you_click(self):
+        self.open_incomplete_record()
+        self.assertTrue(self.page.locator("#scrapeNotice").is_visible())
+        self.click_continue()
+        self.assertFalse(self.page.locator("#scrapeNotice").is_visible(),
+                         "点了之后这块提示应该自己消失，不该继续占着地方")
+
     def test_an_incomplete_record_offers_to_continue(self):
         self.open_incomplete_record()
         self.assertTrue(self.page.locator("#scrapeNotice").is_visible())
@@ -113,8 +126,7 @@ class ContinueCollectUITest(unittest.TestCase):
     def test_the_page_stays_fully_usable_while_it_runs(self):
         self.open_incomplete_record()
         rows = self.page.locator("#list .row").count()
-        self.page.locator("#continueCollect").click()
-        self.page.wait_for_function("window.continueCalls.length===1")
+        self.click_continue()
 
         # 没有任何"加载中"的副作用
         self.assertFalse(self.page.evaluate("recognizing"),
@@ -124,7 +136,8 @@ class ContinueCollectUITest(unittest.TestCase):
         self.assertFalse(self.page.locator("#recognize").is_disabled())
         self.assertEqual(self.page.locator("#list .row").count(), rows,
                          "列表不该被清空或重建")
-        self.assertEqual(self.page.locator("#continueCollect").inner_text(), "后台抓取中…")
+        self.assertTrue(self.page.locator("#scrapeNotice").is_hidden(),
+                        "提示条应该已经让开")
 
         # 勾选、翻页这些操作照常可用
         self.page.locator("#selectAll").click()
@@ -132,46 +145,47 @@ class ContinueCollectUITest(unittest.TestCase):
 
     def test_finishing_for_real_hides_the_notice(self):
         self.open_incomplete_record()
-        self.page.locator("#continueCollect").click()
-        self.page.wait_for_function("window.continueCalls.length===1")
+        self.click_continue()
         self.page.evaluate("""backgroundCollect({username:'apple',running:false,complete:true,
             count:900,needsVerification:false,warning:''})""")
         self.assertTrue(self.page.locator("#scrapeNotice").is_hidden())
         self.assertIn("已读取至作品末页", self.page.locator("#status").inner_text())
         self.assertEqual(self.page.locator("#continueCollect").count(), 0)
 
-    def test_finishing_short_leaves_the_button_usable(self):
+    def test_finishing_short_brings_the_button_back(self):
+        # 跑完了还是没补齐 —— 回到"不完整且空闲"，提示条该重新出现让用户能再点
         self.open_incomplete_record()
-        self.page.locator("#continueCollect").click()
-        self.page.wait_for_function("window.continueCalls.length===1")
+        self.click_continue()
         self.page.evaluate("""backgroundCollect({username:'apple',running:false,complete:false,
             count:900,needsVerification:false,warning:'分页连续 45 秒没有前进'})""")
+        self.assertTrue(self.page.locator("#scrapeNotice").is_visible())
         button = self.page.locator("#continueCollect")
         self.assertEqual(button.inner_text(), "继续抓取")
         self.assertFalse(button.is_disabled())
-        self.assertTrue(self.page.locator("#scrapeNotice").is_visible())
 
     def test_a_failed_background_run_reports_and_recovers(self):
         self.open_incomplete_record()
-        self.page.locator("#continueCollect").click()
-        self.page.wait_for_function("window.continueCalls.length===1")
+        self.click_continue()
         self.page.evaluate("""backgroundCollect({username:'apple',running:false,
             error:'TikTok 没有返回可读取的作品'})""")
+        self.assertTrue(self.page.locator("#scrapeNotice").is_visible(),
+                        "失败后要把提示条还回来，否则用户没有重试入口")
+        self.assertIn("后台抓取失败", self.page.locator("#scrapeNotice").inner_text())
         self.assertIn("后台抓取失败", self.page.locator("#status").inner_text())
         self.assertEqual(self.page.locator("#continueCollect").inner_text(), "继续抓取")
         self.assertFalse(self.page.locator("#continueCollect").is_disabled())
 
     def test_switching_creator_leaves_the_open_page_alone(self):
         self.open_incomplete_record()
-        self.page.locator("#continueCollect").click()
-        self.page.wait_for_function("window.continueCalls.length===1")
+        self.click_continue()
         self.page.fill("#url", "https://www.tiktok.com/@banana")
-        notice_before = self.page.locator("#scrapeNotice").inner_text()
+        # 提示条已被隐藏，inner_text 会返回空串，这里要的是原始文本
+        notice_before = self.page.locator("#scrapeNotice").text_content()
 
         self.page.evaluate("""backgroundCollect({username:'apple',running:false,complete:true,
             count:900,needsVerification:false,warning:''})""")
 
-        self.assertEqual(self.page.locator("#scrapeNotice").inner_text(), notice_before,
+        self.assertEqual(self.page.locator("#scrapeNotice").text_content(), notice_before,
                          "用户已经切走了，不该重建当前页面的提示条")
         self.assertIn("已后台补齐", self.page.locator("#status").inner_text())
 

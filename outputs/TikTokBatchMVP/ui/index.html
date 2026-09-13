@@ -78,6 +78,11 @@
     videos=data.videos||videos;currentUsername=data.username;const pages=Math.max(1,Math.ceil(videos.length/pageSize));if(currentPage>pages)currentPage=pages;$('allCount').textContent=videos.length;$('videoCount').textContent=videos.filter(v=>(v.type||'video')==='video').length;$('imageCount').textContent=videos.filter(v=>v.type==='image').length;$('empty').classList.add('hidden');$('profile').style.display='flex';$('tabs').style.display='flex';$('toolbar').style.display='flex';$('list').style.display='block';sync();setStatus(backgroundCollecting?`后台继续抓取中：已获取 ${videos.length} 条`:`${data.complete?'历史已完整':'已保存抓取历史'}：${videos.length} 条`)
   }
   let verificationTarget='',verificationPending=false;
+  function setNoticeVisible(visible){
+    const n=$('scrapeNotice');if(!n)return null;
+    n.hidden=!visible;n.style.display=visible?'flex':'none';
+    return n
+  }
   async function continueInBackground(username,button){
     if(backgroundCollecting)return;
     try{
@@ -85,21 +90,34 @@
       if(!answer.ok){setStatus(answer.error||'无法开始后台抓取');return}
       backgroundCollecting=true;
       if(button){button.disabled=true;button.textContent='后台抓取中…'}
+      // 已经交给后台了，提示条留着只会白占地方
+      setNoticeVisible(false);
       setStatus('正在后台继续抓取，可以照常浏览、勾选和下载…')
     }catch(error){setStatus('无法开始后台抓取：'+(error.message||error))}
   }
   function backgroundCollect(data){
     if(!data)return;
-    const button=$('continueCollect');
-    if(data.running){if(button){button.disabled=true;button.textContent='后台抓取中…'}setStatus('正在后台继续抓取，可以照常浏览、勾选和下载…');return}
+    if(data.running){backgroundCollecting=true;setNoticeVisible(false);setStatus('正在后台继续抓取，可以照常浏览、勾选和下载…');return}
     backgroundCollecting=false;
-    if(data.error){if(button){button.disabled=false;button.textContent='继续抓取'}setStatus('后台抓取失败：'+data.error);return}
     const shown=$('url').value.match(/@([^/?]+)/)?.[1];
-    if(!shown||shown.toLowerCase()!==String(data.username||'').toLowerCase()){
+    const sameProfile=!!shown&&shown.toLowerCase()===String(data.username||'').toLowerCase();
+    if(data.error){
+      if(sameProfile){
+        const notice=setNoticeVisible(true);
+        const message=notice&&notice.firstElementChild;
+        if(message)message.textContent='后台抓取失败：'+data.error+'，可以再点「继续抓取」重试。';
+        const retry=$('continueCollect');
+        if(retry){retry.disabled=false;retry.textContent='继续抓取'}
+      }
+      setStatus('后台抓取失败：'+data.error);
+      return
+    }
+    if(!sameProfile){
       // 用户已经切到别的博主：只更新状态栏，绝不动当前页面
       setStatus(data.complete?`@${data.username} 已后台补齐：共 ${data.count} 条`:`@${data.username} 后台抓取结束：已保留 ${data.count} 条`);
       return
     }
+    // 又回到"不完整且空闲"了，提示条该重新出现让用户能再点一次
     showScrapeResult({username:data.username,cached:false,complete:!!data.complete,cancelled:false,needsVerification:!!data.needsVerification,warning:data.warning||'',videos:videos})
   }
   function showScrapeResult(r){
