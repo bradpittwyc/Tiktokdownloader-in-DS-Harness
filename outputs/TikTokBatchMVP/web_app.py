@@ -2090,7 +2090,14 @@ def webview_storage_path():
     return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "webview"
 
 
-WINDOW_TITLE = "TikTok 下载器"
+# 版本号放在窗口标题栏，不放页面里。
+#
+# 依据（读 pywebview 6.2.1 源码得到，不是猜的）：winforms 后端在建窗时
+# 执行一次 `self.Text = window.title`（winforms.py:197），
+# 整个包里**没有**任何 DocumentTitleChanged 处理 —— 也就是说 HTML 的
+# <title> 不会反向覆盖原生标题栏，Windows 实际显示的就是这个字符串。
+# 所以改这里就够了，不必去动 index.html。
+WINDOW_TITLE = f"TikTok 下载器 {app_version()}"
 
 
 def apply_window_icon(title=WINDOW_TITLE, attempts=40):

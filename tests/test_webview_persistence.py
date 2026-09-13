@@ -17,10 +17,58 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "outputs/TikTokBatchMVP"))
-from web_app import Api, apply_window_icon, start_ui, webview_storage_path  # noqa: E402
+from web_app import (  # noqa: E402
+    Api,
+    WINDOW_TITLE,
+    app_version,
+    apply_window_icon,
+    start_ui,
+    webview_storage_path,
+)
 
 ICON_PATH = (Path(__file__).resolve().parents[1]
              / "outputs/TikTokBatchMVP/ui/tiktok-logo.ico")
+
+
+class WindowTitleTests(unittest.TestCase):
+    """标题栏左上角的版本号。
+
+    pywebview 的 winforms 后端只在建窗时给 `self.Text` 赋一次值
+    （winforms.py:197），整个包里没有任何 DocumentTitleChanged 处理 ——
+    所以 HTML 的 <title> 不会覆盖原生标题栏，标题完全由 WINDOW_TITLE 决定。
+    这也意味着版本号必须写进这个常量，改 index.html 是没用的。
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.env = patch.dict(os.environ, {"LOCALAPPDATA": self.temp.name})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.temp.cleanup()
+
+    def test_the_title_carries_the_real_version(self):
+        version = app_version()
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$",
+                         "VERSION 读不到时是 0.0.0，这里的断言会连带暴露打包漏带 VERSION")
+        self.assertEqual(WINDOW_TITLE, f"TikTok 下载器 {version}")
+
+    def test_the_title_is_not_the_stale_bare_name(self):
+        # 回归网：改回不带版本号的旧标题就应该失败（索引页自己不做这件事）
+        self.assertNotEqual(WINDOW_TITLE, "TikTok 下载器")
+
+    def test_the_version_in_the_title_is_this_build_s_not_a_hardcoded_one(self):
+        version_file = (Path(__file__).resolve().parents[1]
+                        / "outputs/TikTokBatchMVP/VERSION")
+        self.assertEqual(WINDOW_TITLE, f"TikTok 下载器 {version_file.read_text('utf-8').strip()}",
+                         "标题里的版本必须来自 VERSION，不能在代码里另写一份")
+
+    def test_the_window_is_created_with_that_title(self):
+        api = Api()
+        with patch("web_app.webview.create_window") as create, patch("web_app.webview.start"):
+            start_ui(api)
+        self.assertEqual(create.call_args.args[0], WINDOW_TITLE)
 
 
 class WindowIconTests(unittest.TestCase):

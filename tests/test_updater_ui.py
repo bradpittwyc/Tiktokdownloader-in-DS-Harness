@@ -90,15 +90,6 @@ class UpdaterUITest(unittest.TestCase):
         self.assertIn("get_update_info", self.page.evaluate("window.calls"))
         self.assertIn("当前版本", self.page.locator("#updateCurrent").inner_text())
 
-    def test_header_shows_the_version_at_the_top_left(self):
-        self.page.wait_for_function(
-            "document.getElementById('appVersion').textContent==='v1.0.2'")
-        version = self.page.locator("#appVersion").bounding_box()
-        url_box = self.page.locator("#url").bounding_box()
-        self.assertLess(version["x"], url_box["x"], "版本号要在地址栏左边，也就是左上角")
-        self.assertLess(version["y"], 120, "版本号要在顶栏里，不能掉到下面")
-        self.assertEqual(self.errors, [])
-
     def test_checking_reports_a_new_version_with_notes(self):
         self.open_settings()
         self.page.locator("#checkUpdate").click()
