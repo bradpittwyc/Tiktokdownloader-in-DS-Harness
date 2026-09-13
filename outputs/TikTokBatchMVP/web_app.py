@@ -1886,6 +1886,56 @@ def webview_storage_path():
     return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "webview"
 
 
+WINDOW_TITLE = "TikTok 下载器"
+
+
+def apply_window_icon(title=WINDOW_TITLE, attempts=40):
+    """Give the window the TikTok icon.
+
+    pywebview documents its `icon` argument as "Supported only on GTK/QT", and
+    only the cocoa/gtk backends read it — so on Windows the taskbar falls back to
+    whatever the host process carries. That is why a source run shows the Python
+    logo even though the packaged EXE already embeds the right icon. Set it on the
+    real window instead, which covers both ways of starting the app.
+    """
+    if os.name != "nt":
+        return False
+    icon = BASE / "ui" / "tiktok-logo.ico"
+    if not icon.is_file():
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.FindWindowW.restype = wintypes.HWND
+        user32.LoadImageW.restype = wintypes.HANDLE
+        try:
+            # Without an explicit AppUserModelID the taskbar groups us under
+            # python.exe / the bootloader and may keep showing their icon.
+            ctypes.WinDLL("shell32").SetCurrentProcessExplicitAppUserModelID(
+                "TikTokBatchMVP.TikTokDownloader")
+        except Exception:
+            pass
+        IMAGE_ICON, LR_LOADFROMFILE = 1, 0x0010
+        WM_SETICON, ICON_SMALL, ICON_BIG = 0x0080, 0, 1
+        for _ in range(attempts):
+            hwnd = user32.FindWindowW(None, title)
+            if hwnd:
+                for size, slot in ((16, ICON_SMALL), (32, ICON_BIG)):
+                    handle = user32.LoadImageW(None, str(icon), IMAGE_ICON,
+                                               size, size, LR_LOADFROMFILE)
+                    if handle:
+                        user32.SendMessageW(hwnd, WM_SETICON, slot, handle)
+                log_event("已设置窗口图标")
+                return True
+            time.sleep(.25)
+        log_event("没找到窗口，窗口图标未设置")
+    except Exception as exc:
+        log_event(f"设置窗口图标失败: {exc}")
+    return False
+
+
 def start_ui(api):
     """Open the window and run until it closes.
 
@@ -1898,7 +1948,7 @@ def start_ui(api):
         private_mode=False -> write 'VALUE-123', next run reads 'VALUE-123'
     """
     api._window = webview.create_window(
-        "TikTok 下载器",
+        WINDOW_TITLE,
         str(BASE / "ui" / "index.html"),
         js_api=api,
         width=1320,
@@ -1906,7 +1956,7 @@ def start_ui(api):
         min_size=(1000, 650),
         background_color="#0b0e14",
     )
-    webview.start(debug=False, private_mode=False,
+    webview.start(func=apply_window_icon, debug=False, private_mode=False,
                   storage_path=str(webview_storage_path()))
     return api._window
 

@@ -17,7 +17,52 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "outputs/TikTokBatchMVP"))
-from web_app import Api, start_ui, webview_storage_path  # noqa: E402
+from web_app import Api, apply_window_icon, start_ui, webview_storage_path  # noqa: E402
+
+ICON_PATH = (Path(__file__).resolve().parents[1]
+             / "outputs/TikTokBatchMVP/ui/tiktok-logo.ico")
+
+
+class WindowIconTests(unittest.TestCase):
+    """窗口图标。
+
+    pywebview 的 icon 参数文档写着 "Supported only on GTK/QT"，Windows 后端
+    根本不读它 —— 所以源码运行时会顶着 pythonw.exe 的 Python 图标。
+    只能自己挂 webview.start(func=...) 去给真实窗口发 WM_SETICON。
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.env = patch.dict(os.environ, {"LOCALAPPDATA": self.temp.name})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.temp.cleanup()
+
+    def test_the_icon_asset_is_a_real_multi_size_ico(self):
+        self.assertTrue(ICON_PATH.is_file(),
+                        "窗口图标资源必须存在，否则打包和运行时都拿不到")
+        data = ICON_PATH.read_bytes()
+        self.assertEqual(data[:4], b"\x00\x00\x01\x00", "不是合法的 ICO 文件头")
+        count = int.from_bytes(data[4:6], "little")
+        self.assertGreaterEqual(count, 4,
+                                "ICO 要含多个尺寸：任务栏、Alt+Tab、资源管理器各取所需")
+
+    def test_a_missing_icon_file_is_not_fatal(self):
+        with patch("web_app.BASE", Path(self.temp.name)):
+            self.assertFalse(apply_window_icon(attempts=1),
+                             "图标缺失不能让应用起不来")
+
+    def test_no_matching_window_is_not_fatal(self):
+        self.assertFalse(apply_window_icon(title="__tiktok_no_such_window__", attempts=1))
+
+    def test_start_ui_installs_the_icon_hook(self):
+        api = Api()
+        with patch("web_app.webview.create_window"), patch("web_app.webview.start") as start:
+            start_ui(api)
+        self.assertIs(start.call_args.kwargs.get("func"), apply_window_icon,
+                      "必须在 webview.start(func=...) 里设置图标，否则 Windows 上没人管")
 
 
 class WebviewPersistenceTests(unittest.TestCase):

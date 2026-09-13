@@ -13,7 +13,9 @@ from PyInstaller.utils.hooks import collect_all
 # PyInstaller sets SPECPATH to the folder containing this spec.
 ROOT = Path(SPECPATH).resolve().parent
 APP = ROOT / "outputs" / "TikTokBatchMVP"
-ICON = APP / "ui" / "tiktok-logo.png"
+# 用 .ico 而不是 .png：PyInstaller 会临时转换 png，直接给它 ico 更可控，
+# 而且同一个文件也被 web_app.apply_window_icon() 用来设置窗口图标。
+ICON = APP / "ui" / "tiktok-logo.ico"
 
 datas = [(str(APP / "ui"), "ui")]
 binaries = []
