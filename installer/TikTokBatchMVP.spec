@@ -16,6 +16,9 @@ APP = ROOT / "outputs" / "TikTokBatchMVP"
 # 用 .ico 而不是 .png：PyInstaller 会临时转换 png，直接给它 ico 更可控，
 # 而且同一个文件也被 web_app.apply_window_icon() 用来设置窗口图标。
 ICON = APP / "ui" / "tiktok-logo.ico"
+# build.ps1 generates this from outputs/TikTokBatchMVP/VERSION so the EXE's file
+# properties and the installer can never disagree with each other.
+VERSION_FILE = ROOT / "installer" / "version_info.txt"
 
 datas = [(str(APP / "ui"), "ui")]
 binaries = []
@@ -49,6 +52,7 @@ exe = EXE(
     [],
     name="TikTokBatchMVP",
     icon=str(ICON),
+    version=str(VERSION_FILE) if VERSION_FILE.is_file() else None,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

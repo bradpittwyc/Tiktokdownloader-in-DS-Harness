@@ -7,3 +7,6 @@ outputs/*.mp4
 work/
 __pycache__/
 *.pyc
+
+# build.ps1 从 outputs/TikTokBatchMVP/VERSION 生成，不入库
+installer/version_info.txt

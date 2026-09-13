@@ -1,0 +1,59 @@
+第三方开源组件声明
+============================================================
+
+本软件包含以下开源组件，它们各自的版权与许可条款归原作者所有。
+各组件的许可证全文收录在本文件同级的 licenses 目录中。
+
+------------------------------------------------------------
+
+yt-dlp 2026.8.19
+  许可证 : Unlicense
+  用途   : 抓取 TikTok 媒体地址、下载视频与字幕
+  项目   : Documentation, https://github.com/yt-dlp/yt-dlp#readme
+  全文   : licenses/yt-dlp-LICENSE
+
+Playwright (Python) 1.62.0
+  许可证 : Apache-2.0
+  用途   : 驱动本机 Chrome 读取页面与翻页
+  项目   : homepage, https://github.com/Microsoft/playwright-python
+  全文   : licenses/playwright-LICENSE, licenses/playwright-LICENSE, licenses/playwright-LICENSE, licenses/playwright-NOTICE
+
+pywebview 6.2.1
+  许可证 : BSD 3-Clause License
+  用途   : 承载界面的桌面外壳（Windows 上走 WebView2）
+  项目   : Homepage, https://pywebview.flowrl.com/
+  全文   : licenses/pywebview-LICENSE
+
+curl_cffi 0.16.3
+  许可证 : MIT
+  用途   : 让 yt-dlp 的请求指纹与 Chrome 一致
+  项目   : repository, https://github.com/lexiforest/curl_cffi
+  全文   : licenses/curl-cffi-LICENSE
+
+python-docx 1.2.0
+  许可证 : MIT
+  用途   : 生成英文学习文档（.docx）
+  项目   : Changelog, https://github.com/python-openxml/python-docx/blob/master/HISTORY.rst
+  全文   : licenses/python-docx-LICENSE
+
+requests 2.33.1
+  许可证 : Apache-2.0
+  用途   : 下载图文帖的图片
+  项目   : Documentation, https://requests.readthedocs.io
+  全文   : licenses/requests-LICENSE, licenses/requests-NOTICE
+
+Pillow 12.2.0
+  许可证 : MIT-CMU
+  用途   : 图片处理
+  项目   : Release notes, https://pillow.readthedocs.io/en/stable/releasenotes/index.html
+  全文   : licenses/pillow-LICENSE
+
+------------------------------------------------------------
+
+构建工具：PyInstaller（GPLv2 或更新版本，附带特殊例外条款，
+允许对其打包产物自由使用）。PyInstaller 不会进入最终产品的运行时。
+
+本软件使用 Microsoft Edge WebView2 运行时，该运行时由 Microsoft 提供，
+受其自身许可条款约束，不随本软件分发。
+
+本软件不包含、不修改上述组件的源代码。

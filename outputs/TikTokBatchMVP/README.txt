@@ -1,4 +1,4 @@
-TikTok 下载器 1.0.1
+TikTok 下载器
 
 使用方法
 1. 双击 TikTokBatchMVP.exe。
