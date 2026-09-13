@@ -12,6 +12,7 @@ import shutil
 import base64
 import subprocess
 import socket
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -27,10 +28,17 @@ from yt_dlp.networking.impersonate import ImpersonateTarget
 from playwright.sync_api import sync_playwright
 
 from app import clean_profile_url, find_chrome
-from session_store import SessionStore, tiktok_cookies, has_session, chrome_app_bound
+from session_store import SessionStore, tiktok_cookies, has_session, chrome_app_bound, dpapi
 
 
 BASE = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).parent
+
+# 自动升级指向的仓库与 release。
+# 仓库是私有的，未认证请求 GitHub API 会直接 404 —— 所以支持可选的 GitHub Token
+# （见 set_update_token）。仓库改成公开后就不需要 Token 了。
+UPDATE_REPO = "bradpittwyc/Tiktokdownloader-in-DS-Harness"
+UPDATE_API_LATEST = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
+UPDATE_ASSET_PREFIX = "TikTokBatchMVP-Setup-"
 
 # TikTok 官方画质档位。实测所有视频只出现这三档，format_id 形如
 #     <编码器>_<档位>p_<码率>-<序号>
@@ -125,6 +133,27 @@ def log_event(message):
         pass
 
 
+def app_version():
+    """当前运行的程序版本。
+
+    打包后 VERSION 随 .spec 的 datas 一起进了 _MEIPASS，所以 BASE 两种情况都对。
+    """
+    try:
+        value = (BASE / "VERSION").read_text(encoding="utf-8").strip()
+    except Exception:
+        return "0.0.0"
+    return value or "0.0.0"
+
+
+def version_tuple(value):
+    """'v1.2.3' / '1.2.3' -> (1, 2, 3)，用于比较大小。
+
+    按数字段比较而不是字符串：'1.10.0' > '1.9.0' 用字符串比较是错的。
+    """
+    numbers = re.findall(r"\d+", str(value or ""))
+    return tuple(int(n) for n in numbers[:4]) or (0,)
+
+
 class Api:
     def __init__(self):
         self._window = None
@@ -161,6 +190,7 @@ class Api:
         self._session_user_agent = ""
         self._filename_template = self._load_filename_template()
         self._learning = self._load_learning_options()
+        self._update_token = self._load_update_token()
 
     def _load_filename_template(self):
         path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "filename-template.txt"
@@ -395,6 +425,180 @@ class Api:
         if self._cookie_browser == "saved":
             return "软件保存的 TikTok 登录态"
         return self._cookie_browser or "未使用"
+
+    def _update_token_file(self):
+        return self._session_store.root / "github-token.dpapi"
+
+    def _load_update_token(self):
+        """读回 GitHub Token。和登录态一样用 DPAPI 加密存放，不落明文。"""
+        path = self._update_token_file()
+        try:
+            return dpapi(path.read_bytes(), decrypt=True).decode("utf-8").strip()
+        except Exception:
+            return ""
+
+    def _save_update_token(self, token):
+        path = self._update_token_file()
+        try:
+            if not token:
+                path.unlink(missing_ok=True)
+                return True
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(dpapi(str(token).encode("utf-8")))
+            return True
+        except Exception as exc:
+            log_event(f"保存 GitHub Token 失败: {exc}")
+            return False
+
+    def _github_headers(self, accept="application/vnd.github+json"):
+        headers = {"Accept": accept,
+                   "User-Agent": f"TikTokBatchMVP/{app_version()}",
+                   "X-GitHub-Api-Version": "2022-11-28"}
+        if self._update_token:
+            headers["Authorization"] = f"Bearer {self._update_token}"
+        return headers
+
+    def get_update_info(self):
+        """本地状态，不发网络请求。"""
+        return {"ok": True, "current": app_version(), "repo": UPDATE_REPO,
+                "tokenSet": bool(self._update_token)}
+
+    def set_update_token(self, token):
+        self._update_token = str(token or "").strip()
+        if not self._save_update_token(self._update_token):
+            return {"ok": False, "error": "无法保存 Token（本机加密存储不可写）"}
+        log_event("GitHub Token 已更新" if self._update_token else "GitHub Token 已清除")
+        return {"ok": True, "tokenSet": bool(self._update_token)}
+
+    def check_update(self):
+        """查最新 release 并和当前版本比较。"""
+        try:
+            response = requests.get(UPDATE_API_LATEST, headers=self._github_headers(),
+                                    timeout=20)
+        except Exception as exc:
+            return {"ok": False, "error": f"无法连接 GitHub：{exc}"}
+        if response.status_code == 404:
+            # 私有仓库对未认证请求就是 404，不是"没有 release"
+            return {"ok": False, "needsToken": True, "current": app_version(),
+                    "error": "读不到 release。仓库如果是私有的，需要在下面填 GitHub Token。"}
+        if response.status_code in (401, 403):
+            return {"ok": False, "error": "GitHub 拒绝了请求：Token 无效或已触发频率限制"}
+        if response.status_code != 200:
+            return {"ok": False, "error": f"GitHub 返回了 {response.status_code}"}
+        try:
+            payload = response.json()
+        except Exception:
+            return {"ok": False, "error": "GitHub 返回的内容无法解析"}
+        tag = str(payload.get("tag_name") or "").strip()
+        latest = tag.lstrip("vV")
+        current = app_version()
+        asset = next((item for item in payload.get("assets") or []
+                      if UPDATE_ASSET_PREFIX in str(item.get("name") or "")), None)
+        return {
+            "ok": True, "current": current, "latest": latest, "tag": tag,
+            "hasUpdate": version_tuple(latest) > version_tuple(current),
+            "notes": str(payload.get("body") or "").strip(),
+            "publishedAt": str(payload.get("published_at") or ""),
+            "htmlUrl": str(payload.get("html_url") or ""),
+            "asset": {"name": asset.get("name"), "size": asset.get("size"),
+                      "url": asset.get("url"),
+                      "download": asset.get("browser_download_url")} if asset else None,
+        }
+
+    def download_update(self):
+        """把新版本的安装包下到临时目录。进度通过 updateProgress 事件推给界面。"""
+        info = self.check_update()
+        if not info.get("ok"):
+            return info
+        if not info.get("hasUpdate"):
+            return {"ok": False, "error": f"已经是最新版本（{info.get('current')}）"}
+        asset = info.get("asset")
+        if not asset:
+            return {"ok": False, "error": "这个 release 里没有安装包"}
+
+        target = Path(tempfile.gettempdir()) / f"TikTokBatchMVP-Setup-{info['latest']}.exe"
+        last_emit = [0.0]
+
+        try:
+            response = None
+            # 私有仓库的 browser_download_url 也要带 Token；
+            # 走 API 的 asset url + octet-stream 是最稳的。
+            if asset.get("url"):
+                response = requests.get(asset["url"],
+                                        headers=self._github_headers("application/octet-stream"),
+                                        stream=True, timeout=30)
+                if response.status_code != 200:
+                    response.close()
+                    response = None
+            if response is None and asset.get("download"):
+                response = requests.get(asset["download"], headers=self._github_headers(),
+                                        stream=True, timeout=30)
+            if response is None:
+                return {"ok": False, "error": "没有可用的下载地址"}
+            response.raise_for_status()
+
+            total = int(response.headers.get("Content-Length") or asset.get("size") or 0)
+            done = 0
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "wb") as handle:
+                for chunk in response.iter_content(256 * 1024):
+                    if not chunk:
+                        continue
+                    handle.write(chunk)
+                    done += len(chunk)
+                    now = time.time()
+                    if now - last_emit[0] >= 0.3:
+                        last_emit[0] = now
+                        self._emit("updateProgress", {
+                            "downloaded": done, "total": total,
+                            "percent": round(done * 100 / total) if total else 0})
+            self._emit("updateProgress", {"downloaded": done, "total": total,
+                                          "percent": 100, "done": True})
+            log_event(f"更新包已下载: {target} ({done} 字节)")
+            return {"ok": True, "path": str(target), "version": info["latest"], "size": done}
+        except Exception as exc:
+            try:
+                target.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return {"ok": False, "error": f"下载失败：{exc}"}
+
+    def install_update(self, path=""):
+        """运行下载好的安装包，然后退出本程序，让安装程序接管文件替换。"""
+        target = Path(str(path or ""))
+        if not target.is_file():
+            return {"ok": False, "error": "安装包不存在，请重新下载"}
+        if target.suffix.lower() != ".exe":
+            return {"ok": False, "error": "安装包格式不对"}
+        try:
+            subprocess.Popen([str(target)], cwd=str(target.parent))
+        except Exception as exc:
+            return {"ok": False, "error": f"无法启动安装程序：{exc}"}
+        log_event(f"启动升级安装包: {target}")
+        # 留一点时间把界面上的话说清楚，再退出
+        timer = threading.Timer(1.5, self._quit_for_update)
+        timer.daemon = True
+        timer.start()
+        return {"ok": True, "path": str(target)}
+
+    def _quit_for_update(self):
+        try:
+            if self._window is not None:
+                self._window.destroy()
+        except Exception:
+            pass
+
+    def open_release_page(self, url=""):
+        """在默认浏览器里打开本项目的 GitHub 页面。"""
+        target = str(url or "").strip() or f"https://github.com/{UPDATE_REPO}/releases"
+        # 只允许本项目域名，避免界面能把任意 URL 丢给系统去打开
+        if not target.startswith("https://github.com/"):
+            return {"ok": False, "error": "只允许打开本项目的 GitHub 页面"}
+        try:
+            os.startfile(target)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": f"无法打开浏览器：{exc}"}
 
     def login_tiktok(self):
         if not self._login_lock.acquire(blocking=False):
