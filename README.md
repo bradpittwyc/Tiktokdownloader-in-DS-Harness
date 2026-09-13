@@ -41,7 +41,7 @@ installer\build.ps1 -Installer
 ```
 
 - 免安装版：`outputs/TikTokBatchMVP/TikTokBatchMVP.exe`
-- 安装包：`release/TikTokBatchMVP-Setup-1.0.0.exe`
+- 安装包：`release/TikTokBatchMVP-Setup-<版本号>.exe`（版本号写在 `installer/TikTokBatchMVP.iss`）
 
 构建流程会先跑一遍**打包自检**（`installer/frozen_self_test.py`，
 即 `TikTokBatchMVP.exe --self-test <report.json>`），确认依赖、Playwright 驱动、

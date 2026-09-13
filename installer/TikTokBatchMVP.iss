@@ -1,5 +1,5 @@
 #define AppName "TikTok 下载器"
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 #define AppPublisher "TikTokBatchMVP"
 #define AppExeName "TikTokBatchMVP.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\TikTokBatchMVP
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=..\release
-OutputBaseFilename=TikTokBatchMVP-Setup-1.0.0
+OutputBaseFilename=TikTokBatchMVP-Setup-1.0.1
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
