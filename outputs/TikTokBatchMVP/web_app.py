@@ -780,6 +780,42 @@ class Api:
             return {"ok": False, "error": "没有成功读取任何博主"}
         return {"ok": True, "profiles": results}
 
+    def open_profile(self, raw_url):
+        """Open a creator straight from the local archive — no browser, no network.
+
+        Re-opening someone already scraped should be instant and must not spend
+        another TikTok request. Only the 重新抓取 button forces a real read.
+        """
+        try:
+            url = clean_profile_url(raw_url)
+        except Exception:
+            return {"ok": False, "error": "请输入 TikTok 博主主页链接"}
+        match = re.search(r"/@([^/?]+)", url)
+        username = match.group(1) if match else ""
+        archive = self._load_profile_archive(username)
+        videos = [row for row in archive.get("videos", []) if isinstance(row, dict)]
+        if not username or not videos:
+            log_event(f"本地没有 @{username} 的记录，转正常抓取")
+            return {"ok": False, "missing": True, "username": username}
+        self._collection_complete = bool(archive.get("history_complete"))
+        self._collection_warning = ""
+        self._collection_needs_verification = False
+        self._collection_window_closed = False
+        owner = archive.get("avatar_owner") == username
+        self._profile_avatar = archive.get("avatar", "") if owner else ""
+        self._profile_stats = archive.get("profile_stats", {}) if owner else {}
+        last_sync = archive.get("last_sync")
+        stamp = time.strftime("%m-%d %H:%M", time.localtime(last_sync)) if last_sync else "时间未知"
+        log_event(f"打开本地记录 @{username}: {len(videos)} 条, "
+                  f"完整={self._collection_complete}, 最后更新={stamp}")
+        warning = "" if self._collection_complete else "本地记录上次没抓完，点「重新抓取」可以接着补齐。"
+        return {"ok": True, "cached": True, "complete": self._collection_complete,
+                "warning": warning, "needsVerification": False,
+                "username": username, "avatar": self._profile_avatar,
+                "profileStats": self._profile_stats, "videos": videos,
+                "lastSync": last_sync,
+                "message": f"已载入本地记录 {len(videos)} 条（最后更新 {stamp}），没有重新抓取"}
+
     def save_task_state(self, username, record):
         try:
             root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "tasks"
@@ -821,7 +857,9 @@ class Api:
                 if not username:
                     continue
                 profiles.append({"username": username, "avatar": avatar,
-                                 "count": len(cached.get("videos") or [])})
+                                 "count": len(cached.get("videos") or []),
+                                 "complete": bool(cached.get("history_complete")),
+                                 "lastSync": cached.get("last_sync")})
                 if len(profiles) >= 12:
                     break
             except Exception:
