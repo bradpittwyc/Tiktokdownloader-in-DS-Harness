@@ -1764,6 +1764,35 @@ class Api:
         return {"ok": ok, "failed": failed, "folder": str(target)}
 
 
+def webview_storage_path():
+    return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "webview"
+
+
+def start_ui(api):
+    """Open the window and run until it closes.
+
+    private_mode MUST stay off. pywebview defaults it to True, and on Windows
+    that makes EdgeChromium use a throw-away profile, so localStorage is gone on
+    the next launch — every preference (default folder, concurrency, retries,
+    date range, multi URLs, download records, study notes) silently resets.
+    Measured with two separate processes on a file:// page:
+        private_mode=True  -> write 'VALUE-123', next run reads None
+        private_mode=False -> write 'VALUE-123', next run reads 'VALUE-123'
+    """
+    api._window = webview.create_window(
+        "TikTok 下载器",
+        str(BASE / "ui" / "index.html"),
+        js_api=api,
+        width=1320,
+        height=880,
+        min_size=(1000, 650),
+        background_color="#0b0e14",
+    )
+    webview.start(debug=False, private_mode=False,
+                  storage_path=str(webview_storage_path()))
+    return api._window
+
+
 if __name__ == "__main__":
     if "--browser-probe" in sys.argv:
         report_path = Path(sys.argv[sys.argv.index("--browser-probe") + 1])
@@ -1805,14 +1834,5 @@ if __name__ == "__main__":
             pass
         raise SystemExit(0)
     api = Api()
-    api._window = webview.create_window(
-        "TikTok 下载器",
-        str(BASE / "ui" / "index.html"),
-        js_api=api,
-        width=1320,
-        height=880,
-        min_size=(1000, 650),
-        background_color="#0b0e14",
-    )
-    webview.start(debug=False)
+    start_ui(api)
 
