@@ -21,6 +21,7 @@ VIDEOS = [
 
 BRIDGE = """
 window.continueCalls = [];
+window.newestFlags = [];
 window.scrapeCalls = [];
 window.recentRows = [{username:'apple', avatar:'', count:2, complete:false, lastSync:1}];
 window.cachedResult = {ok:true, cached:true, complete:false,
@@ -35,7 +36,8 @@ window.pywebview = {api:(()=>{
     recognize: async url=>{window.scrapeCalls.push(url);return {ok:true,complete:true,
         warning:'',needsVerification:false,username:'apple',avatar:'',
         profileStats:{},videos:__VIDEOS__}},
-    continue_collect: async url=>{window.continueCalls.push(url);return {ok:true,started:true}},
+    continue_collect: async (url,newestOnly)=>{window.continueCalls.push(url);
+        window.newestFlags.push(!!newestOnly);return {ok:true,started:true}},
     load_task_state: async()=>({ok:true,records:{}}),
     enrich: async()=>({updated:0})
   };
@@ -191,13 +193,101 @@ class ContinueCollectUITest(unittest.TestCase):
 
     def test_the_bar_reports_progress_without_touching_pagination(self):
         self.open_incomplete_record()
-        self.page.evaluate("window.continueCalls=[]")
         # 翻到第 2 页需要更多数据，这里只验证 archiveUpdate 不会把页码打回 1
         self.page.evaluate("""archiveUpdate({username:'apple',complete:false,
             videos:window.cachedResult.videos})""")
         self.assertEqual(self.page.evaluate("currentPage"), 1)
         self.assertEqual(self.page.locator("#list .row").count(), 2)
         self.assertEqual(self.errors, [])
+
+    # ---------- 追新 ----------
+
+    def test_follow_new_button_sits_in_the_tabs_bar(self):
+        self.page.wait_for_selector(".recent-card")
+        self.page.locator(".recent-card").click()
+        self.page.wait_for_function("!!document.getElementById('continueCollect')")
+        button = self.page.locator("#followNew")
+        self.assertTrue(button.is_visible(), "打开博主后「追新」应该可见")
+        self.assertEqual(button.inner_text(), "追新")
+        # 必须挂在 tabs 区块里（用户要求放在这块的最右边）
+        self.assertEqual(self.page.evaluate(
+            "document.getElementById('followNew').parentElement.id"), "tabs")
+
+    def test_follow_new_is_hidden_before_any_profile_is_open(self):
+        self.assertTrue(self.page.locator("#tabs").is_hidden())
+        self.assertFalse(self.page.locator("#followNew").is_visible())
+
+    def test_clicking_follow_new_asks_the_backend_for_newest_only(self):
+        self.open_incomplete_record()
+        self.page.locator("#followNew").click()
+        self.page.wait_for_function("window.continueCalls.length===1")
+        self.assertEqual(self.page.evaluate("window.continueCalls"),
+                         ["https://www.tiktok.com/@apple"])
+        self.assertEqual(self.page.evaluate("window.newestFlags"), [True],
+                         "必须把 newest_only 传下去，否则会跑成整站抓取")
+        self.assertEqual(self.page.evaluate("window.scrapeCalls.length"), 0,
+                         "追新也不该走 recognize 那条阻塞路径")
+
+    def test_follow_new_shows_progress_then_the_result(self):
+        self.open_incomplete_record()
+        self.page.locator("#followNew").click()
+        self.page.wait_for_function("window.continueCalls.length===1")
+        self.page.wait_for_function(
+            "document.getElementById('followNew').textContent==='追新中…'")
+        self.assertTrue(self.page.locator("#followNew").is_disabled())
+        self.assertIn("正在后台追新", self.page.locator("#status").inner_text())
+
+        self.page.evaluate("""backgroundCollect({username:'apple',running:false,
+            newestOnly:true,complete:false,count:2519,newCount:2,
+            needsVerification:false,warning:''})""")
+        self.assertIn("发现 2 条新作品", self.page.locator("#status").inner_text())
+        self.assertEqual(self.page.locator("#followNew").inner_text(), "追新")
+        self.assertFalse(self.page.locator("#followNew").is_disabled())
+
+    def test_follow_new_says_so_when_there_is_nothing_new(self):
+        self.open_incomplete_record()
+        self.page.locator("#followNew").click()
+        self.page.wait_for_function("window.continueCalls.length===1")
+        self.page.evaluate("""backgroundCollect({username:'apple',running:false,
+            newestOnly:true,complete:false,count:2517,newCount:0,
+            needsVerification:false,warning:''})""")
+        self.assertIn("没有新作品", self.page.locator("#status").inner_text())
+
+    def test_follow_new_does_not_bring_back_the_notice(self):
+        # 「继续抓取」跑完没补齐会把提示条还回来；追新不该有这种副作用
+        self.open_incomplete_record()
+        self.click_continue()          # 先把提示条收起来
+        self.page.evaluate("""backgroundCollect({username:'apple',running:false,
+            newestOnly:false,complete:false,count:2517,newCount:0,
+            needsVerification:false,warning:'还没抓完'})""")
+        self.assertTrue(self.page.locator("#scrapeNotice").is_visible())
+        self.page.locator("#followNew").click()
+        self.page.wait_for_function("window.continueCalls.length===2")
+        self.page.evaluate("""backgroundCollect({username:'apple',running:false,
+            newestOnly:true,complete:false,count:2517,newCount:0,
+            needsVerification:false,warning:'还没抓完'})""")
+        # 追新结束后提示条维持原样，不会被重建
+        self.assertTrue(self.page.locator("#scrapeNotice").is_visible())
+
+    def test_follow_new_failure_is_reported(self):
+        self.open_incomplete_record()
+        self.page.locator("#followNew").click()
+        self.page.wait_for_function("window.continueCalls.length===1")
+        self.page.evaluate("""backgroundCollect({username:'apple',running:false,
+            newestOnly:true,error:'TikTok 没有返回可读取的作品'})""")
+        self.assertIn("追新失败", self.page.locator("#status").inner_text())
+        self.assertEqual(self.page.locator("#followNew").inner_text(), "追新")
+        self.assertFalse(self.page.locator("#followNew").is_disabled())
+
+    def test_follow_new_does_not_freeze_the_page(self):
+        self.open_incomplete_record()
+        rows = self.page.locator("#list .row").count()
+        self.page.locator("#followNew").click()
+        self.page.wait_for_function("window.continueCalls.length===1")
+        self.assertFalse(self.page.evaluate("recognizing"))
+        self.assertTrue(self.page.locator("#scrapeLoading").is_hidden())
+        self.assertFalse(self.page.locator("#url").is_disabled())
+        self.assertEqual(self.page.locator("#list .row").count(), rows)
 
 
 if __name__ == "__main__":

@@ -517,12 +517,15 @@ class Api:
             self._emit("cookieStatus", self.get_cookie_status())
             self._emit("verificationStatus", self._verification_status)
 
-    def continue_collect(self, raw_url):
+    def continue_collect(self, raw_url, newest_only=False):
         """Finish a creator's archive in the background; never blocks the UI.
 
         Unlike recognize(), this returns immediately. Progress reaches the page
         through the archiveUpdate events that _store_profile_archive already
         emits, so browsing, selecting and downloading keep working untouched.
+
+        newest_only stops at the first post it already has, which is what the
+        「追新」button wants: grab what was published since last time, nothing more.
         """
         try:
             url = clean_profile_url(raw_url)
@@ -533,31 +536,38 @@ class Api:
         if not username:
             return {"ok": False, "error": "无法识别博主用户名"}
         if not self._background_collect_lock.acquire(blocking=False):
-            return {"ok": False, "busy": True, "error": "后台已经在继续抓取，请稍候"}
+            return {"ok": False, "busy": True, "error": "后台已经在抓取了，请稍候"}
         if not self._profile_lock.acquire(blocking=False):
             self._background_collect_lock.release()
             return {"ok": False, "busy": True, "error": "抓取或登录正在进行，等这次结束后再试"}
-        log_event(f"@{username} 开始后台继续抓取")
-        self._emit("backgroundCollect", {"username": username, "running": True})
-        threading.Thread(target=self._continue_collect_worker, args=(url, username),
-                         daemon=True).start()
+        log_event(f"@{username} 开始后台{'追新' if newest_only else '继续抓取'}")
+        self._emit("backgroundCollect", {"username": username, "running": True,
+                                         "newestOnly": bool(newest_only)})
+        threading.Thread(target=self._continue_collect_worker,
+                         args=(url, username, bool(newest_only)), daemon=True).start()
         return {"ok": True, "started": True}
 
-    def _continue_collect_worker(self, url, username):
+    def _continue_collect_worker(self, url, username, newest_only=False):
         try:
-            videos = self._collect_videos(url, lock_held=True)
+            before = {str(row.get("id")) for row in
+                      self._load_profile_archive(username).get("videos", []) if isinstance(row, dict)}
+            videos = self._collect_videos(url, lock_held=True, newest_only=newest_only)
             result = self._store_profile_archive(username, videos, self._collection_complete)
-            log_event(f"@{username} 后台继续抓取结束: {len(result['videos'])} 条, "
-                      f"complete={result['complete']}, warning={self._collection_warning!r}")
+            fresh = len({str(row.get("id")) for row in result["videos"]} - before)
+            log_event(f"@{username} 后台{'追新' if newest_only else '继续抓取'}结束: "
+                      f"{len(result['videos'])} 条（新增 {fresh}）, complete={result['complete']}, "
+                      f"warning={self._collection_warning!r}")
             self._emit("backgroundCollect", {"username": username, "running": False,
+                                             "newestOnly": newest_only,
                                              "complete": result["complete"],
                                              "count": len(result["videos"]),
+                                             "newCount": fresh,
                                              "needsVerification": result["needsVerification"],
                                              "warning": self._collection_warning})
         except Exception as exc:
-            log_event(f"@{username} 后台继续抓取失败: {exc}")
+            log_event(f"@{username} 后台{'追新' if newest_only else '继续抓取'}失败: {exc}")
             self._emit("backgroundCollect", {"username": username, "running": False,
-                                             "error": str(exc)})
+                                             "newestOnly": newest_only, "error": str(exc)})
         finally:
             self._background_collect_lock.release()
             self._profile_lock.release()
@@ -1149,6 +1159,55 @@ class Api:
         except Exception:
             return False
 
+    def _profile_in_use(self):
+        """True when some Chrome still holds our user-data-dir.
+
+        Chrome keeps an exclusive handle on <profile>/lockfile while it runs and
+        removes the file on a clean exit. Measured on this machine:
+        no Chrome -> file absent; Chrome running -> opening it raises PermissionError.
+        """
+        lock = self._login_profile_dir() / "lockfile"
+        if not lock.exists():
+            return False
+        try:
+            with open(lock, "r+b"):
+                return False
+        except OSError:
+            return True
+
+    def _kill_chrome_on_profile(self):
+        """Terminate leftover Chrome processes holding our profile.
+
+        A surviving Chrome makes the next launch hand its command line over and
+        exit: the debug port never opens and the run dies 25 seconds later with a
+        baffling ECONNREFUSED. That happens whenever the app is closed while a
+        background collect is running, because those workers are daemon threads.
+        Matched on the exact user-data-dir, so the user's own Chrome (a different
+        profile) is never touched.
+        """
+        profile = str(self._login_profile_dir()).replace("'", "''")
+        script = ("Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+                  f"Where-Object {{ $_.CommandLine -like '*{profile}*' }} | "
+                  "Select-Object -ExpandProperty ProcessId")
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, timeout=60)
+        except Exception as exc:
+            log_event(f"查找残留 Chrome 失败: {exc}")
+            return 0
+        pids = [line.strip() for line in (completed.stdout or "").splitlines()
+                if line.strip().isdigit()]
+        for pid in pids:
+            try:
+                subprocess.run(["taskkill", "/PID", pid, "/T", "/F"],
+                               capture_output=True, text=True, timeout=30)
+            except Exception:
+                pass
+        if pids:
+            log_event(f"结束了 {len(pids)} 个残留 Chrome: {pids}")
+        return len(pids)
+
     def _launch_native_chrome(self, url, visible=False):
         """Start a real Chrome with CDP and return (process, cdp_url).
 
@@ -1163,6 +1222,13 @@ class Api:
         """
         profile = self._login_profile_dir()
         profile.mkdir(parents=True, exist_ok=True)
+        if self._profile_in_use():
+            log_event("profile 被残留 Chrome 占用，先清理再启动")
+            self._kill_chrome_on_profile()
+            for _ in range(20):
+                if not self._profile_in_use():
+                    break
+                time.sleep(.25)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -1219,7 +1285,8 @@ class Api:
         except Exception as exc:
             log_event(f"注入 cookie 失败（继续）: {exc}")
 
-    def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None):
+    def _collect_videos(self, url, interactive=False, lock_held=False, cdp_url=None,
+                        newest_only=False):
         from profile_pagination import ProfilePagination
 
         # Reject an invalid requested login source before Playwright starts.
@@ -1240,7 +1307,7 @@ class Api:
         chrome_process = None
         log_event(f"抓取 @{username}: interactive={interactive}, "
                   f"cdp={'有' if cdp_url else '无'}, 存档 {len(known_ids)} 条, 增量={incremental}, "
-                  f"cookie来源={self._cookie_browser or '匿名'}")
+                  f"只追新={newest_only}, cookie来源={self._cookie_browser or '匿名'}")
 
         def merge_api_items():
             for ident, item in pagination.items.items():
@@ -1378,12 +1445,17 @@ class Api:
                         if pagination.complete:
                             self._collection_complete = True
                             break
-                        # Once a complete archive exists, the first overlap proves
-                        # we reached previously saved history; future syncs only
-                        # need to collect the newer prefix.
-                        if incremental and known_ids.intersection(found):
-                            self._collection_complete = True
-                            self._collection_warning = f"增量同步完成，本次发现 {len(set(found) - known_ids)} 条新作品。"
+                        # 追上已知历史就能停：既有的日志本来就完整时叫"增量同步"，
+                        # 用户主动点「追新」时叫"追新"。
+                        if (incremental or newest_only) and known_ids.intersection(found):
+                            fresh = len(set(found) - known_ids)
+                            if incremental:
+                                self._collection_complete = True
+                                self._collection_warning = f"增量同步完成，本次发现 {fresh} 条新作品。"
+                            else:
+                                # 追新只保证"追上已知历史"，历史本身仍可能不完整。
+                                # 这里绝不能把 complete 置真，否则会错误锁存 history_complete。
+                                self._collection_warning = f"追新完成，本次发现 {fresh} 条新作品。"
                             break
                         now = time.monotonic()
                         if len(found) != previous or pagination.revision != previous_revision:

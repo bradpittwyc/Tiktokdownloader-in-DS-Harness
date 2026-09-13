@@ -38,8 +38,9 @@ class ContinueCollectTests(unittest.TestCase):
         self.temp.cleanup()
 
     def fake_collect(self, result=None, error=None, delay=0.0):
-        def collect(url, interactive=False, lock_held=False, cdp_url=None):
-            self.collected.append({"url": url, "lock_held": lock_held})
+        def collect(url, interactive=False, lock_held=False, cdp_url=None, newest_only=False):
+            self.collected.append({"url": url, "lock_held": lock_held,
+                                   "newest_only": newest_only})
             if delay:
                 time.sleep(delay)
             if error:
@@ -139,6 +140,51 @@ class ContinueCollectTests(unittest.TestCase):
         self.api.continue_collect("https://www.tiktok.com/@owner/video/1")
         self.wait_for_finish()
         self.assertEqual(self.collected[0]["url"], "https://www.tiktok.com/@owner")
+
+    # ---------- 追新（newest_only） ----------
+
+    def test_newest_only_is_forwarded_to_the_collector(self):
+        self.fake_collect(result=[video(3)])
+        self.api.continue_collect("https://www.tiktok.com/@owner", True)
+        self.wait_for_finish()
+        self.assertTrue(self.collected[0]["newest_only"],
+                        "没把 newest_only 传下去的话，追新会跑成整站抓取")
+
+    def test_newest_only_defaults_to_off(self):
+        self.fake_collect(result=[video(1)])
+        self.api.continue_collect("https://www.tiktok.com/@owner")
+        self.wait_for_finish()
+        self.assertFalse(self.collected[0]["newest_only"])
+
+    def test_the_running_event_carries_the_mode(self):
+        self.fake_collect(result=[video(1)])
+        self.api.continue_collect("https://www.tiktok.com/@owner", True)
+        self.wait_for_finish()
+        self.assertTrue(self.background_events()[0]["newestOnly"])
+        final = self.wait_for_finish()
+        self.assertTrue(final["newestOnly"])
+
+    def test_new_count_counts_only_what_was_actually_added(self):
+        self.api._store_profile_archive("owner", [video(1), video(2)], False)
+        self.fake_collect(result=[video(2), video(3)])
+        self.api.continue_collect("https://www.tiktok.com/@owner", True)
+        final = self.wait_for_finish()
+        self.assertEqual(final["newCount"], 1, "只有 3 是新的")
+        self.assertEqual(final["count"], 3)
+
+    def test_new_count_is_zero_when_nothing_is_new(self):
+        self.api._store_profile_archive("owner", [video(1)], False)
+        self.fake_collect(result=[video(1)])
+        self.api.continue_collect("https://www.tiktok.com/@owner", True)
+        self.assertEqual(self.wait_for_finish()["newCount"], 0)
+
+    def test_follow_new_failure_is_reported_with_the_right_wording(self):
+        self.fake_collect(error=RuntimeError("被限流"))
+        self.api.continue_collect("https://www.tiktok.com/@owner", True)
+        final = self.wait_for_finish()
+        self.assertIn("限流", final["error"])
+        self.assertTrue(self.api._background_collect_lock.acquire(blocking=False))
+        self.api._background_collect_lock.release()
 
 
 if __name__ == "__main__":
