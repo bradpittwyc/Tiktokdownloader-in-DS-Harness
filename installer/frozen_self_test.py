@@ -57,6 +57,7 @@ if "--self-test" in sys.argv:
         "session_store",
         "profile_pagination",
         "asset_index",
+        "ai_tagging",
     ):
         check(f"import:{module_name}", lambda name=module_name: importlib.import_module(name).__name__)
 

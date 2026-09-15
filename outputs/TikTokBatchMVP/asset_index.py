@@ -16,6 +16,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from ai_tagging import meta_summary, meta_tags
+
 
 MEDIA_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".jpg", ".jpeg", ".png", ".webp"}
 SUBTITLE_EXTS = {".srt", ".vtt", ".ass", ".ttml", ".srv1", ".srv2", ".srv3", ".json"}
@@ -341,6 +343,10 @@ def library_row(asset, meta):
         "comments": stats.get("comments"),
         "shares": stats.get("shares"),
         "hashtags": list(meta.get("hashtags") or []),
+        # AI 打的标签。老 meta 没有 ai 段，读出来就是空 —— 前端据此判断
+        # "这条还没打标签"，不需要额外的状态位。
+        "tags": meta_tags(meta),
+        "summary": meta_summary(meta),
         "resolution": video.get("resolution") or "",
         "desc": str(meta.get("description") or "")[:DESC_LIMIT],
         "hasMeta": bool(meta),

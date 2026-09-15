@@ -46,8 +46,19 @@ from asset_index import (
     index_summary,
     is_sidecar,
     library_rows,
+    load_meta,
     sanitize_info,
     scan_assets,
+)
+from ai_tagging import (
+    DEFAULT_PROVIDER,
+    build_tag_prompt,
+    merge_tags,
+    meta_tags,
+    parse_tag_response,
+    provider_defaults,
+    resolve_endpoint,
+    tag_input_text,
 )
 from session_store import SessionStore, tiktok_cookies, has_session, chrome_app_bound, dpapi
 
@@ -184,6 +195,8 @@ class Api:
         self._cancel_downloads = threading.Event()
         # 补齐素材是独立的长任务，用自己的取消信号，不去搅下载队列那个。
         self._asset_cancel = threading.Event()
+        # 打标签是另一个长任务，也分开 —— 两个都可能在跑。
+        self._asset_tag_cancel = threading.Event()
         self._cookie_file = ""
         self._cookie_browser = ""
         self._cookie_error = ""
@@ -241,7 +254,8 @@ class Api:
 
     def _load_learning_options(self):
         defaults = {"enabled": False, "translation": True, "vocabulary": True,
-                    "timestamps": True, "api_base": "https://api.openai.com/v1",
+                    "timestamps": True, "provider": DEFAULT_PROVIDER,
+                    "api_base": "https://api.openai.com/v1",
                     "model": "gpt-4o-mini", "api_key": ""}
         try:
             saved = json.loads(self._learning_file().read_text(encoding="utf-8"))
@@ -267,6 +281,8 @@ class Api:
             "translation": bool(options.get("translation", True)),
             "vocabulary": bool(options.get("vocabulary", True)),
             "timestamps": bool(options.get("timestamps", True)),
+            "provider": str(options.get("provider") or current.get("provider")
+                            or DEFAULT_PROVIDER).strip(),
             "api_base": str(options.get("api_base") or "https://api.openai.com/v1").strip().rstrip("/"),
             "model": str(options.get("model") or "gpt-4o-mini").strip(),
         })
@@ -283,16 +299,28 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def _call_learning_model(self, prompt, max_tokens=6000):
-        base = self._learning["api_base"].rstrip("/")
-        endpoint = base if base.endswith("/chat/completions") else base + "/chat/completions"
-        response = requests.post(endpoint, headers={"Authorization": f"Bearer {self._learning['api_key']}",
-            "Content-Type": "application/json"}, json={"model": self._learning["model"], "temperature": .25,
-            "max_tokens": max_tokens, "messages": [{"role": "system", "content": "You are a precise English learning editor."},
-            {"role": "user", "content": prompt}]}, timeout=180)
+    def _call_model(self, messages, max_tokens=6000, temperature=.25):
+        """一次 Chat Completions 调用。
+
+        提供方（OpenAI / DeepSeek / 自定义）只影响 base 与模型名 ——
+        三家都是 OpenAI 兼容接口，所以这里只有一份实现。
+        """
+        endpoint = resolve_endpoint(self._learning.get("api_base"))
+        if not endpoint:
+            raise RuntimeError("没有配置 API 地址")
+        response = requests.post(endpoint, headers={
+            "Authorization": f"Bearer {self._learning['api_key']}",
+            "Content-Type": "application/json"}, json={
+                "model": self._learning["model"], "temperature": temperature,
+                "max_tokens": max_tokens, "messages": messages}, timeout=180)
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
+
+    def _call_learning_model(self, prompt, max_tokens=6000):
+        return self._call_model(
+            [{"role": "system", "content": "You are a precise English learning editor."},
+             {"role": "user", "content": prompt}], max_tokens=max_tokens)
 
     @staticmethod
     def _subtitle_text(paths):
@@ -1282,6 +1310,90 @@ class Api:
         return {"ok": True, "updated": done, "examined": examined,
                 "failed": failed, "folder": str(target),
                 "cancelled": self._asset_cancel.is_set()}
+
+    def cancel_asset_tagging(self):
+        self._asset_tag_cancel.set()
+        return {"ok": True}
+
+    def tag_assets(self, folder, paths=None, limit=0, force=False):
+        """给素材打 AI 标签，写进各自 meta.json 的 `ai` 段。
+
+        **认的是文件路径，不是作品 id** —— 没补过的素材根本没有 id
+        （id 存在 meta.json 里），所以"按路径指定要打哪几条"是唯一能用的方式，
+        搜索结果里的那几条也就真的只打那几条。
+
+        **不联网取数据**：标签只用本地已有的东西 —— meta.json 里的标题与文案，
+        加上旁边的字幕。所以**必须先补齐**，没有 meta 的素材会跳过并计数。
+        """
+        if not self._learning.get("api_key"):
+            return {"ok": False, "error": "请先在「设置 → 学习文档」里填 AI 的 API Key"}
+        assets, _ = scan_assets(folder)
+        wanted = {str(Path(path)) for path in (paths or []) if str(path or "").strip()}
+        if wanted:
+            assets = [asset for asset in assets if str(asset["media"]) in wanted]
+        self._asset_tag_cancel.clear()
+
+        provider = self._learning.get("provider") or DEFAULT_PROVIDER
+        model = self._learning.get("model") or ""
+        updated, failed = 0, []
+        skipped = {"no_meta": 0, "tagged": 0, "empty": 0, "filtered": 0}
+        try:
+            for index, asset in enumerate(assets, 1):
+                if self._asset_tag_cancel.is_set():
+                    break
+                meta_path = asset.get("meta")
+                if not meta_path:
+                    # 没有 meta 就没标题没文案，只有文件名不值得花一次调用
+                    skipped["no_meta"] += 1
+                    continue
+                meta = load_meta(meta_path) or {}
+                if meta_tags(meta) and not force:
+                    skipped["tagged"] += 1
+                    continue
+                transcript = self._subtitle_text(asset.get("subtitles") or [])
+                # 判"有没有东西可读"只看 meta 里的文字和字幕，**不算文件名**。
+                # 文件名是给人看的兜底，拿一串纯数字作品 id 去问模型，
+                # 换回来的只会是它编出来的标签。
+                title = str(meta.get("title") or "").strip()
+                description = str(meta.get("description") or "").strip()
+                if not tag_input_text(title, description, transcript):
+                    skipped["empty"] += 1
+                    continue
+                # 提示词里给个能读的名字；只有文件名可用时也别让它空着
+                title = title or asset["stem"]
+                if limit and updated >= int(limit):
+                    skipped["filtered"] += 1
+                    continue
+                self._emit("assetTagging", {"current": index, "total": len(assets),
+                                            "stem": asset["stem"], "state": "working"})
+                try:
+                    prompt = build_tag_prompt(title, description, transcript)
+                    reply = self._call_model(
+                        [{"role": "system", "content": prompt["system"]},
+                         {"role": "user", "content": prompt["user"]}], max_tokens=400)
+                    tags, summary = parse_tag_response(reply)
+                    if not tags:
+                        raise RuntimeError("模型没有返回可用的标签")
+                    merged = merge_tags(meta, tags, summary, provider, model,
+                                        datetime.datetime.now().isoformat(timespec="seconds"))
+                    # 读出来改一处再整体写回 —— 只写 ai 段会把标题/统计全抹掉，
+                    # 那是 4.19 里 enrich 抹归档字段的同类事故。
+                    path = Path(meta_path)
+                    temporary = path.with_suffix(".json.tmp")
+                    temporary.write_text(json.dumps(merged, ensure_ascii=False, indent=2),
+                                         encoding="utf-8")
+                    os.replace(temporary, path)
+                    updated += 1
+                    self._emit("assetTagging", {"current": index, "total": len(assets),
+                                                "stem": asset["stem"], "state": "done",
+                                                "tags": tags})
+                except Exception as exc:
+                    failed.append({"stem": asset["stem"], "error": str(exc)})
+        finally:
+            self._emit("assetTagging", {"done": True, "updated": updated,
+                                        "failed": len(failed), "total": len(assets)})
+        return {"ok": True, "updated": updated, "failed": failed, "skipped": skipped,
+                "cancelled": self._asset_tag_cancel.is_set()}
 
     def _emit(self, function, value):
         if self._window:

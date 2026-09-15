@@ -27,6 +27,7 @@ ROWS = [
      "id": "111", "title": "We are going back to the Moon", "author": "nasa",
      "nickname": "NASA", "date": "20260905", "duration": 66, "views": 341100,
      "likes": 31900, "comments": 12, "shares": 30, "hashtags": ["Moon", "Artemis"],
+     "tags": [], "summary": "",
      "resolution": "720x1280", "desc": "Summer winds down #Moon", "hasMeta": False},
     {"folder": "F:\\TikTok\\@nasa", "stem": "Midnight pasta_20260906", "type": "video",
      "media": "F:\\TikTok\\@nasa\\Midnight pasta_20260906.mp4",
@@ -34,13 +35,15 @@ ROWS = [
      "id": "222", "title": "Midnight pasta experiment", "author": "chef",
      "nickname": "Chef Ann", "date": "20260906", "duration": 30, "views": 1200,
      "likes": 90, "comments": 1, "shares": 2, "hashtags": ["food"],
+     "tags": [], "summary": "",
      "resolution": "1080x1920", "desc": "a midnight snack #food", "hasMeta": True},
     {"folder": "F:\\TikTok\\@nasa", "stem": "Photo set_20260907_[333]", "type": "image",
      "media": "F:\\TikTok\\@nasa\\Photo set_20260907_[333]",
      "gaps": ["meta"], "subtitles": 0,
      "id": "333", "title": "Photo set from Tokyo", "author": "taro", "nickname": "Taro",
      "date": "20260907", "duration": None, "views": 88000, "likes": 7000,
-     "comments": 3, "shares": 8, "hashtags": [], "resolution": "",
+     "comments": 3, "shares": 8, "hashtags": [], "tags": ["街拍", "东京"],
+     "summary": "东京街头随拍", "resolution": "",
      "desc": "Tokyo streets", "hasMeta": False},
 ]
 
@@ -57,18 +60,23 @@ BRIDGE = """
 window.calls = [];
 window.scanResult = %s;
 window.backfillResult = {ok:true, updated:7, examined:9, failed:[], folder:'F:\\\\TikTok\\\\@nasa', cancelled:false};
+window.tagResult = {ok:true, updated:1, failed:[], skipped:{no_meta:1,tagged:1,empty:0,filtered:0}, cancelled:false};
+window.learningOptions = {apiKeySet:false, provider:'openai', api_base:'https://api.openai.com/v1', model:'gpt-4o-mini'};
 window.pywebview = {api:(()=>{
   const explicit = {
     scan_assets: async f=>{window.calls.push('scan_assets:'+f);return window.scanResult},
     backfill_assets: async (f,u)=>{window.calls.push('backfill_assets:'+f+'|'+u);return window.backfillResult},
     cancel_asset_backfill: async()=>{window.calls.push('cancel_asset_backfill');return {ok:true}},
+    tag_assets: async (f,paths)=>{window.calls.push('tag_assets:'+f+'|'+(paths||[]).join(','));return window.tagResult},
+    cancel_asset_tagging: async()=>{window.calls.push('cancel_asset_tagging');return {ok:true}},
+    get_learning_options: async()=>window.learningOptions,
     choose_folder: async()=>{window.calls.push('choose_folder');return 'F:\\\\TikTok'},
     recent_profiles: async()=>[], refresh_recent_profiles: async()=>({ok:true,profiles:[]}),
     load_task_state: async()=>({ok:true,records:{}}), enrich: async()=>({updated:0}),
-    get_update_info: async()=>({ok:true,current:'1.2.0',tokenSet:false}),
+    get_update_info: async()=>({ok:true,current:'1.3.0',tokenSet:false}),
     set_cookie_options: async()=>({ok:true,hasSession:false}),
     get_cookie_status: async()=>({ok:true,hasSession:false}),
-    get_filename_template: async()=>'', get_learning_options: async()=>({})
+    get_filename_template: async()=>''
   };
   return new Proxy(explicit,{get(target,prop){
     if(typeof prop!=='string') return undefined;
@@ -311,6 +319,98 @@ class AssetsUITest(unittest.TestCase):
         self.assertIn("3/9", self.page.locator("#assetsMessage").inner_text())
         self.page.evaluate("assetBackfill({done:true,updated:7,failed:1,total:9})")
         self.assertIn("更新 7 条", self.page.locator("#assetsMessage").inner_text())
+
+    # --- AI 打标签 -----------------------------------------------------
+
+    def open_with_ai(self):
+        self.page.evaluate("window.learningOptions={apiKeySet:true,provider:'deepseek'}")
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+
+    def test_the_tag_button_is_greyed_out_without_an_api_key(self):
+        self.set_folder()
+        self.open_modal()                       # 默认 apiKeySet:false
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.assertTrue(self.page.locator("#assetsTag").is_disabled())
+        self.page.evaluate("assetsTag()")
+        self.page.wait_for_function("document.getElementById('assetsMessage').textContent.length>0")
+        self.assertIn("API Key", self.page.locator("#assetsMessage").inner_text())
+        self.assertEqual(self.page.evaluate(
+            "window.calls.filter(c=>c.startsWith('tag_assets')).length"), 0)
+
+    def test_rows_show_the_ai_tags_when_they_have_them(self):
+        self.open_with_ai()
+        self.assertIn("🏷 街拍 · 东京", self.listing())
+
+    def test_search_matches_ai_tags(self):
+        # 这正是打标签的意义：文案里没明写的内容也能搜到
+        self.open_with_ai()
+        self.search("街拍")
+        listing = self.listing()
+        self.assertIn("Photo set from Tokyo", listing)
+        self.assertNotIn("Midnight pasta", listing)
+
+    def test_the_untagged_filter_hides_tagged_assets(self):
+        self.open_with_ai()
+        self.page.check("#assetsOnlyUntagged")
+        self.page.wait_for_timeout(150)
+        listing = self.listing()
+        self.assertIn("We are going back to the Moon", listing)
+        self.assertNotIn("Photo set from Tokyo", listing)
+
+    def test_tagging_sends_the_paths_of_exactly_what_is_shown(self):
+        # 打标签认路径，所以搜索之后打的就真的只是搜出来那几条
+        self.open_with_ai()
+        self.search("pasta")
+        self.page.wait_for_function("!document.getElementById('assetsTag').disabled")
+        self.page.locator("#assetsTag").click()
+        self.page.wait_for_function("window.calls.some(c=>c.startsWith('tag_assets'))")
+        call = next(c for c in self.page.evaluate("window.calls")
+                    if c.startswith("tag_assets"))
+        self.assertIn("Midnight pasta_20260906.mp4", call)
+        self.assertNotIn("Moon", call)
+        self.assertEqual(self.errors, [])
+
+    def test_assets_without_meta_are_not_tagged_and_are_reported(self):
+        # 没 meta 就没标题文案，后端会跳过 —— 界面要把这件事说出来
+        self.open_with_ai()
+        self.page.wait_for_function("!document.getElementById('assetsTag').disabled")
+        self.page.locator("#assetsTag").click()
+        self.page.wait_for_function(
+            "document.getElementById('assetsMessage').textContent.includes('打标签完成')")
+        message = self.page.locator("#assetsMessage").inner_text()
+        self.assertIn("成功 1 条", message)
+        self.assertIn("还没补齐", message)
+
+    def test_the_tag_button_is_greyed_when_everything_visible_is_tagged(self):
+        self.open_with_ai()
+        self.search("Photo set")            # 这条已经有标签了
+        self.assertTrue(self.page.locator("#assetsTag").is_disabled())
+
+    def test_the_tagging_progress_event_drives_the_message(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.evaluate("assetTagging({current:2,total:5,stem:'Clip',state:'working'})")
+        self.assertIn("2/5", self.page.locator("#assetsMessage").inner_text())
+        self.page.evaluate("assetTagging({done:true,updated:4,failed:1,total:5})")
+        self.assertIn("成功 4 条", self.page.locator("#assetsMessage").inner_text())
+
+    def test_switching_the_provider_fills_in_its_defaults(self):
+        self.page.locator("#settings").click()
+        self.page.wait_for_selector("#settingsModal:not(.hidden)")
+        self.page.select_option("#learningProvider", "deepseek")
+        self.assertEqual(self.page.input_value("#learningBase"), "https://api.deepseek.com/v1")
+        self.assertEqual(self.page.input_value("#learningModel"), "deepseek-chat")
+        self.page.select_option("#learningProvider", "openai")
+        self.assertEqual(self.page.input_value("#learningModel"), "gpt-4o-mini")
+
+    def test_custom_provider_leaves_what_the_user_typed_alone(self):
+        self.page.locator("#settings").click()
+        self.page.wait_for_selector("#settingsModal:not(.hidden)")
+        self.page.fill("#learningBase", "https://my-gateway.local/v1")
+        self.page.select_option("#learningProvider", "custom")
+        self.assertEqual(self.page.input_value("#learningBase"), "https://my-gateway.local/v1")
 
     def test_closing_the_modal_works(self):
         self.open_modal()

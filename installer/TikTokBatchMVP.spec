@@ -25,7 +25,7 @@ datas = [(str(APP / "ui"), "ui"),
          (str(APP / "VERSION"), ".")]
 binaries = []
 hiddenimports = ["webview.platforms.edgechromium", "session_store", "profile_pagination",
-                 "asset_index"]
+                 "asset_index", "ai_tagging"]
 for package in ("yt_dlp", "curl_cffi", "playwright", "webview", "docx"):
     package_datas, package_binaries, package_imports = collect_all(package)
     datas.extend(package_datas)
