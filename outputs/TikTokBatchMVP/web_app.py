@@ -82,6 +82,72 @@ CHALLENGE_MARKERS = ("drag the slider to fit the puzzle", "verify to continue",
 MEDIA_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".jpg", ".jpeg", ".png", ".webp"}
 SUBTITLE_EXTS = {".srt", ".vtt", ".ass", ".ttml", ".srv1", ".srv2", ".srv3", ".json"}
 
+# --- 素材工厂的落盘约定 ---------------------------------------------------
+#
+# 封面、原始信息、素材元数据都跟视频同前缀，所以必须显式排除，否则会被
+# 现有的分类逻辑误判，而且两种误判都很隐蔽：
+#
+#   * MEDIA_EXTS 含 .jpg —— 封面会被当成"媒体文件已存在"。下载前的跳过判断
+#     （download 里 `if existing_media:`）会把**根本没下载过**的作品判成
+#     已下载而静默跳过，用户只会看到"全部完成"却没有文件。
+#   * SUBTITLE_EXTS 含 .json —— 元数据会被塞进 subtitles 列表，
+#     让"有字幕就生成学习文档"的判断误触发，然后拿着空的字幕去问模型。
+#
+# 命名统一用"视频名 + 固定后缀"，不占用 yt-dlp 的 <名>.<语言>.<ext> 命名空间。
+COVER_SUFFIX = ".cover.jpg"
+INFO_SUFFIX = ".info.json"
+META_SUFFIX = ".meta.json"
+AUDIO_SUFFIX = ".audio.mp3"
+SIDECAR_SUFFIXES = (COVER_SUFFIX, INFO_SUFFIX, META_SUFFIX, AUDIO_SUFFIX)
+# 视频排在图片前面用：图文帖的 .jpg 和视频同名时，media[0] 必须是视频。
+VIDEO_EXT_ORDER = (".mp4", ".mkv", ".webm", ".mov", ".avi")
+AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".opus", ".ogg", ".wav", ".flac"}
+
+# yt-dlp 的 info 里带着 cookies 和 http_headers。实测（2026-09-13，
+# @nasa/video/7682095989578091790）连**匿名**提取都会带回
+#     ttwid=1%7COEp_3ruJSA...; tt_csrf=...
+# 注入登录态下载时更会带上 sessionid —— 原样落盘等于把登录凭证
+# 写进用户的视频文件夹（那是会被同步、备份、发给别人的目录）。
+SENSITIVE_INFO_KEYS = frozenset({"cookies", "http_headers"})
+
+# 素材元数据的 schema 版本。改字段必须 +1，素材库按这个选解析器。
+ASSET_SCHEMA = 1
+
+HASHTAG_RE = re.compile(r"#([0-9A-Za-z_\u4e00-\u9fff\u3040-\u30ff]+)")
+
+
+def sanitize_info(value):
+    """Strip credential-bearing keys from anything read out of yt-dlp.
+
+    Applied recursively: the top level carries `cookies`, and every entry in
+    `formats` carries its own `http_headers`.
+    """
+    if isinstance(value, dict):
+        return {key: sanitize_info(item) for key, item in value.items()
+                if key not in SENSITIVE_INFO_KEYS}
+    if isinstance(value, list):
+        return [sanitize_info(item) for item in value]
+    return value
+
+
+def extract_hashtags(text):
+    """TikTok 的话题只能从文案里解析。
+
+    yt-dlp 对 TikTok **不提供** tags 字段（实测恒为 None），只在 description
+    里以 #话题 的形式存在，所以素材库要的话题标签必须自己切。
+    """
+    tags, seen = [], set()
+    for match in HASHTAG_RE.findall(str(text or "")):
+        if match.lower() not in seen:
+            seen.add(match.lower())
+            tags.append(match)
+    return tags
+
+
+def is_sidecar(path):
+    """True for the files this app writes next to the media (cover/info/meta)."""
+    return str(path).lower().endswith(SIDECAR_SUFFIXES)
+
 
 def upload_date_matches(stamp, name):
     """True when a filename carries this video's upload date.
@@ -101,6 +167,84 @@ def upload_date_matches(stamp, name):
         return False
     return any((day + datetime.timedelta(days=offset)).strftime("%Y%m%d") in name
                for offset in (1, -1))
+
+
+def build_asset_meta(info, item=None, files=None):
+    """素材库读的那一份元数据。
+
+    刻意跟 yt-dlp 的原始 info 分开：原始 info 有 62 个字段、还会随 yt-dlp
+    版本变，而素材库需要一个**稳定**的结构。字段名固定，改就要升 ASSET_SCHEMA。
+
+    取值优先用 yt-dlp 刚拿到的 info（最新、最准），退回抓取阶段的 item
+    （离线补写、或 yt-dlp 这次没给出的字段）。
+    """
+    info = info or {}
+    item = item or {}
+    files = files or {}
+
+    def pick(*values):
+        for value in values:
+            if value not in (None, "", [], {}):
+                return value
+        return None
+
+    description = pick(info.get("description"), info.get("title"), item.get("title")) or ""
+    width = pick(info.get("width"), item.get("width"))
+    height = pick(info.get("height"), item.get("height"))
+    timestamp = pick(info.get("timestamp"), item.get("timestamp"))
+    created_at = ""
+    if timestamp:
+        try:
+            created_at = datetime.datetime.fromtimestamp(int(timestamp)).isoformat(timespec="seconds")
+        except (ValueError, TypeError, OSError, OverflowError):
+            created_at = ""
+    return {
+        "schema": ASSET_SCHEMA,
+        "id": str(pick(info.get("id"), item.get("id")) or ""),
+        "url": pick(info.get("webpage_url"), item.get("url")) or "",
+        "type": item.get("type") or "video",
+        "title": pick(info.get("title"), item.get("title")) or "",
+        "description": description,
+        "author": {
+            "username": pick(info.get("uploader"), item.get("author")) or "",
+            "nickname": pick(info.get("channel"), item.get("nickname")) or "",
+            "id": str(pick(info.get("uploader_id")) or ""),
+            "url": pick(info.get("uploader_url")) or "",
+        },
+        "created_at": created_at,
+        "upload_date": pick(info.get("upload_date"), item.get("upload_date")) or "",
+        "duration": pick(info.get("duration"), item.get("duration")),
+        "video": {
+            "width": width,
+            "height": height,
+            "resolution": pick(info.get("resolution"),
+                               f"{width}x{height}" if width and height else None),
+            "aspect_ratio": info.get("aspect_ratio"),
+            "format_id": info.get("format_id"),
+            "ext": info.get("ext"),
+            "vcodec": info.get("vcodec"),
+            "acodec": info.get("acodec"),
+            "dynamic_range": info.get("dynamic_range"),
+            "filesize": pick(info.get("filesize"), info.get("filesize_approx")),
+            "tbr": info.get("tbr"),
+        },
+        "stats": {
+            "views": pick(info.get("view_count"), item.get("views")),
+            "likes": pick(info.get("like_count"), item.get("likes")),
+            "comments": pick(info.get("comment_count"), item.get("comments")),
+            "shares": pick(info.get("repost_count"), item.get("shares")),
+            "saves": info.get("save_count"),
+        },
+        # TikTok 没有 tags 字段，只能从文案切。
+        "hashtags": extract_hashtags(description),
+        "music": {"title": info.get("track") or "", "artist": info.get("artist") or ""},
+        # 全部是文件名，不含路径 —— 整个素材库目录可以整体搬走。
+        "files": files,
+        "source": {
+            "extractor": pick(info.get("extractor_key"), "TikTok"),
+            "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        },
+    }
 
 
 def page_challenged(page):
@@ -1007,7 +1151,13 @@ class Api:
                 files = [path for path in folder.iterdir() if path.is_file()
                          and title[:60].lower() in path.stem.lower()
                          and upload_date_matches(stamp, path.name)]
+        # 封面/元数据跟视频同前缀，绝不能算成"媒体已存在"，否则没下载过的
+        # 作品会被判成已下载而静默跳过。
+        files = [path for path in files if not is_sidecar(path)]
         media = [path for path in files if path.suffix.lower() in MEDIA_EXTS]
+        # 视频排在图片前：media[0] 会被下游当成"这条作品的媒体文件"，
+        # 图文帖混进 jpg 时顺序不能靠 iterdir 的返回次序。
+        media.sort(key=lambda path: (path.suffix.lower() not in VIDEO_EXT_ORDER, path.name))
         subtitles = [path for path in files if path.suffix.lower() in SUBTITLE_EXTS]
         return media, subtitles
 
@@ -1017,7 +1167,148 @@ class Api:
         stem = Path(media_path).stem
         return [path for path in Path(folder).iterdir()
                 if path.is_file() and path.name.startswith(stem + ".")
+                and not is_sidecar(path)
                 and path.suffix.lower() in SUBTITLE_EXTS]
+
+    # --- 素材轨（封面 / 音频 / 原始信息 / 素材元数据）---------------------
+
+    @staticmethod
+    def _audio_format_id(info):
+        """挑出纯音频格式的 format_id，没有就返回 None。
+
+        实测（@nasa/video/7682095989578091790）TikTok 的 formats 里有一个
+        vcodec=none、acodec=mp3 的条目 —— 音视频本来就是两个独立 URL，
+        所以**提音频不需要 ffmpeg**。以后做转码/切片才需要。
+        """
+        for entry in (info or {}).get("formats") or []:
+            if entry.get("vcodec") in (None, "none") and entry.get("acodec") not in (None, "none"):
+                return entry.get("format_id")
+        return None
+
+    @staticmethod
+    def _fetch_cover(url, output, referer=""):
+        """自己抓封面，不用 yt-dlp 的 writethumbnail。
+
+        writethumbnail 固定写成 <视频名>.<ext>，正好落进 SUBTITLE_EXTS 的
+        "<名>.<语言>.<ext>" 命名空间，还会因为 .jpg 在 MEDIA_EXTS 里
+        被当成媒体文件。自己写才能把名字定死成 <视频名>.cover.jpg。
+        """
+        if not url:
+            return None
+        output = Path(output)
+        if output.is_file() and output.stat().st_size > 0:
+            return output
+        response = requests.get(url, timeout=45, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": referer or "https://www.tiktok.com/",
+        })
+        response.raise_for_status()
+        if not response.content:
+            raise RuntimeError("封面返回了空内容")
+        output.write_bytes(response.content)
+        return output
+
+    def _write_asset_sidecars(self, target, media_path, info, item, subtitle_paths, audio_path=None):
+        """把封面、原始信息、素材元数据写到视频旁边。
+
+        这三样都是"锦上添花"：任何一个失败都只记日志，不能让已经下载成功的
+        视频变成失败 —— 否则用户会看到一个下载好了却报错的作品。
+        """
+        target = Path(target)
+        stem = Path(media_path).stem
+        written = {"cover": None, "info": None, "meta": None, "audio": None}
+        if audio_path and Path(audio_path).is_file():
+            written["audio"] = Path(audio_path)
+
+        try:
+            written["cover"] = self._fetch_cover(
+                (info or {}).get("thumbnail") or item.get("cover") or "",
+                target / (stem + COVER_SUFFIX), item.get("url"))
+        except Exception as exc:
+            log_event(f"封面保存失败 {item.get('id')}: {exc}")
+
+        try:
+            # sanitize_info 不能省：info 里带着 cookies 和 http_headers，
+            # 原样落盘等于把登录凭证写进用户的视频文件夹。
+            (target / (stem + INFO_SUFFIX)).write_text(
+                json.dumps(sanitize_info(info or {}), ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8")
+            written["info"] = target / (stem + INFO_SUFFIX)
+        except Exception as exc:
+            log_event(f"原始信息保存失败 {item.get('id')}: {exc}")
+
+        files = {
+            "media": Path(media_path).name,
+            "cover": written["cover"].name if written["cover"] else "",
+            "audio": written["audio"].name if written["audio"] else "",
+            "subtitles": [Path(path).name for path in (subtitle_paths or [])],
+            "info": written["info"].name if written["info"] else "",
+        }
+        try:
+            meta_path = target / (stem + META_SUFFIX)
+            meta_path.write_text(json.dumps(build_asset_meta(info, item, files),
+                                            ensure_ascii=False, indent=2), encoding="utf-8")
+            written["meta"] = meta_path
+        except Exception as exc:
+            log_event(f"素材元数据保存失败 {item.get('id')}: {exc}")
+        return written
+
+    def _write_post_sidecars(self, post_folder, item):
+        """图文帖没有单一媒体文件，元数据直接写进它自己的目录。
+
+        两处跟视频帖不一样，都是有原因的：
+          * 不另存封面 —— 第一张图就是封面。
+          * 没有 <名>.info.json —— 图片是直接用 requests 抓的，
+            整条路径都没走 yt-dlp，也就没有 info 可存。
+        放在子目录里叫 meta.json 而不是 <名>.meta.json：_files_for_item 只扫
+        顶层文件，子目录天然不会被误判，名字也就不必跟视频对齐。
+        """
+        post_folder = Path(post_folder)
+        images = sorted(path.name for path in post_folder.iterdir()
+                        if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"})
+        files = {"media": "", "cover": images[0] if images else "", "audio": "",
+                 "subtitles": [], "info": "", "images": images}
+        try:
+            (post_folder / "meta.json").write_text(
+                json.dumps(build_asset_meta(None, item, files), ensure_ascii=False, indent=2),
+                encoding="utf-8")
+        except Exception as exc:
+            log_event(f"图文帖元数据保存失败 {item.get('id')}: {exc}")
+
+    def _download_audio(self, target, media_path, item, info, options):
+        """把纯音频格式单独拉下来，存成 <视频名>.audio.mp3（拿不到就返回 None）。
+
+        代价说清楚：第二次 yt-dlp 调用要重新解析一次视频页，也就是每个作品
+        多一次页面请求。好处是完全不依赖 ffmpeg。
+        """
+        format_id = self._audio_format_id(info)
+        if not format_id:
+            return None
+        stem = Path(media_path).stem
+        output = Path(target) / (stem + AUDIO_SUFFIX)
+        if output.is_file() and output.stat().st_size > 0:
+            return output
+        audio_options = dict(options)
+        # 把名字钉死在视频名上，不靠模板二次解析出同样的标题。
+        # 中间那截必须留在 %(ext)s 之前：yt-dlp 的 outtmpl 得带扩展名占位符，
+        # 直接写死 .audio.mp3 会被它当成"模板没有扩展名"。
+        audio_options["outtmpl"] = str(Path(target) / f"{stem}.audio.%(ext)s")
+        audio_options["format"] = format_id
+        audio_options.pop("progress_hooks", None)
+        # 必须显式关掉字幕：继承下来的 writesubtitles 会让这一次也去下字幕，
+        # 按 outtmpl 落成 "<名>.audio.eng-US.vtt"。实测就是它把 files.audio
+        # 顶掉了 —— "eng-US.vtt" 按字母排在 "mp3" 前面。
+        audio_options["writesubtitles"] = False
+        audio_options["writeautomaticsub"] = False
+        with self._youtube_dl(audio_options) as ydl:
+            ydl.download([item["url"]])
+        # 再按扩展名过滤一层：光靠前缀会撞上同前缀的非音频文件。
+        produced = sorted(path for path in Path(target).iterdir()
+                          if path.is_file() and path.name.startswith(f"{stem}.audio.")
+                          and path.suffix.lower() in AUDIO_EXTS)
+        if not produced:
+            raise RuntimeError("没有生成音频文件")
+        return produced[0]
 
     def _emit(self, function, value):
         if self._window:
@@ -1257,7 +1548,7 @@ class Api:
         except Exception:
             return {}
 
-    def _store_profile_archive(self, username, rows, complete=False):
+    def _store_profile_archive(self, username, rows, complete=False, announce=True):
         """Merge every observed batch atomically so interrupted runs lose no history."""
         path = self._cache_file(username)
         old = self._load_profile_archive(username)
@@ -1279,8 +1570,11 @@ class Api:
         temporary = path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.replace(temporary, path)
-        self._emit("archiveUpdate", {"username": username, "videos": videos,
-                                     "complete": history_complete, "count": len(videos)})
+        if announce:
+            # enrich 逐条补元数据时会高频调用，广播出去会让前端反复重渲染列表，
+            # 所以增量补数据那条路径传 announce=False。
+            self._emit("archiveUpdate", {"username": username, "videos": videos,
+                                         "complete": history_complete, "count": len(videos)})
         return {"ok": True, "complete": history_complete, "warning": self._collection_warning,
                 "needsVerification": self._collection_needs_verification, "username": username,
                 "avatar": payload["avatar"], "profileStats": payload["profile_stats"], "videos": videos}
@@ -1746,15 +2040,6 @@ class Api:
             return {"updated": 0}
         username_match = re.search(r"/@([^/?]+)", videos[0].get("url", ""))
         username = username_match.group(1) if username_match else "unknown"
-        cache_file = self._cache_file(username)
-        avatar = ""
-        if cache_file.exists():
-            try:
-                cached = json.loads(cache_file.read_text(encoding="utf-8"))
-                if isinstance(cached, dict):
-                    avatar = cached.get("avatar", "")
-            except Exception:
-                pass
         updated = 0
         options = {"quiet": True, "no_warnings": True, "skip_download": True,
                    "socket_timeout": 20, "retries": 1, "noplaylist": True}
@@ -1787,12 +2072,11 @@ class Api:
                     updated += 1
                     self._emit("metadataUpdate", item)
                     if updated % 5 == 0:
-                        cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
-                except Exception:
-                    pass
-                try:
-                    cache_file.parent.mkdir(parents=True, exist_ok=True)
-                    cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
+                        # 必须走归档写入器：以前这里直接写
+                        # {"avatar","avatar_owner","profile_stats","videos"} 四个键，
+                        # 把 schema / history_complete / last_sync / count 整片抹掉。
+                        # 实测 nasdaily.json、primemovies.json 已经缺这些键了。
+                        self._store_profile_archive(username, videos, announce=False)
                 except Exception:
                     pass
                 self._emit("metadataStatus", {"current": index, "total": len(videos)})
@@ -1801,8 +2085,7 @@ class Api:
             # 进度提示必须有终点，否则状态栏会一直挂着"后台读取数据 N/M"。
             # 放在 finally 里，抓取中途出错也不会留下这句残留。
             self._emit("metadataStatus", {"done": True})
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps({"avatar": avatar, "avatar_owner": username, "profile_stats": self._profile_stats, "videos": videos}, ensure_ascii=False), encoding="utf-8")
+        self._store_profile_archive(username, videos, announce=False)
         return {"updated": updated}
 
     def choose_folder(self):
@@ -2017,6 +2300,7 @@ class Api:
                         output.write_bytes(response.content)
                         self._emit("downloadProgress", {"id": item["id"], "state": "progress", "percent": round(photo_index * 100 / len(urls))})
                     ok += 1
+                    self._write_post_sidecars(post_folder, item)
                     self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target), "subtitles": []})
                     continue
                 options = {
@@ -2041,22 +2325,37 @@ class Api:
                 self._apply_cookie_options(options)
                 last_video_error = None
                 resolved_subtitles = []
+                resolved_media = None
+                download_info = {}
                 for video_attempt in range(1, max(1, int(retry_count) + 1) + 1):
                     try:
                         with self._youtube_dl(options) as ydl:
-                            ydl.download([item["url"]])
+                            # 跟 download([url]) 等价，但会把这次解析出来的完整 info
+                            # 交回来 —— 素材元数据和原始信息存档都靠它，不用再请求一次。
+                            download_info = ydl.extract_info(item["url"], download=True) or {}
                         media_files, subtitle_files = self._files_for_item(target, item["id"], item)
                         if not media_files:
                             # Fall back to what yt-dlp said it wrote. Reconstructing
                             # the name from the template breaks whenever the title
                             # was rewritten, truncated on a byte boundary, or the
                             # upload date crosses a timezone boundary.
+                            #
+                            # progress_hooks 对**每一个**下载的文件都会触发，字幕也在
+                            # 里面 —— 不过滤的话 media_files[0] 可能是个 .vtt。
+                            # 实测踩到过：标题里的 emoji 让模糊匹配落空走了这条兜底，
+                            # 媒体名变成 "<名>.eng-US.vtt"，于是封面/音频/元数据
+                            # 全都挂到了字幕的前缀上。
                             media_files = [Path(name) for name in progress_context["finished"]
-                                           if Path(name).is_file()]
+                                           if Path(name).is_file()
+                                           and not is_sidecar(Path(name))
+                                           and Path(name).suffix.lower() in MEDIA_EXTS]
+                            media_files.sort(key=lambda path: (path.suffix.lower() not in VIDEO_EXT_ORDER,
+                                                               path.name))
                             if media_files:
                                 subtitle_files = self._subtitle_siblings(media_files[0], target)
                         if not media_files:
                             raise RuntimeError("下载器未生成目标文件")
+                        resolved_media = media_files[0]
                         resolved_subtitles = subtitle_files
                         last_video_error = None
                         break
@@ -2074,6 +2373,17 @@ class Api:
                     raise last_video_error
                 ok += 1
                 subtitle_paths = [str(path) for path in resolved_subtitles]
+                # 素材轨。三步都失败也不影响"视频已经下好了"这个事实，
+                # 所以全部吞掉异常只记日志 —— 否则用户会看到下载好了却报错的作品。
+                if resolved_media is not None:
+                    audio_path = None
+                    try:
+                        audio_path = self._download_audio(target, resolved_media, item,
+                                                          download_info, options)
+                    except Exception as exc:
+                        log_event(f"音频轨保存失败 {item.get('id')}: {exc}")
+                    self._write_asset_sidecars(target, resolved_media, download_info, item,
+                                               subtitle_paths, audio_path)
                 self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target),
                                                  "subtitles": subtitle_paths})
                 self._queue_learning_document(item, target, subtitle_paths)

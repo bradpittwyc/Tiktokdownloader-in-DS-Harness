@@ -114,7 +114,11 @@ class FilesForItemTests(unittest.TestCase):
 
 
 class FakeYDL:
-    """模拟 yt-dlp：写一个模板根本猜不出来的文件名，并回调 progress hook。"""
+    """模拟 yt-dlp：写一个模板根本猜不出来的文件名，并回调 progress hook。
+
+    download() 与 extract_info(download=True) 两种调用都要支持 —— 正式代码
+    现在走后者，好把这次解析出来的完整 info 拿回来写素材元数据。
+    """
 
     def __init__(self, options, path):
         self.options = options
@@ -126,11 +130,20 @@ class FakeYDL:
     def __exit__(self, *exc):
         return False
 
-    def download(self, urls):
+    def _write(self):
         self.path.write_bytes(b"fake media")
-        for hook in self.options["progress_hooks"]:
+        for hook in self.options.get("progress_hooks") or []:
             hook({"status": "finished", "filename": str(self.path),
                   "downloaded_bytes": 10, "total_bytes": 10})
+
+    def download(self, urls):
+        self._write()
+
+    def extract_info(self, url, download=False):
+        self._write()
+        return {"id": "7681416724331154701", "webpage_url": url,
+                "title": REAL_TITLE, "description": REAL_TITLE,
+                "upload_date": "20260904"}
 
 
 class DownloadResolutionTests(unittest.TestCase):
@@ -203,7 +216,7 @@ class DownloadResolutionTests(unittest.TestCase):
         (folder / "@owner").mkdir(parents=True, exist_ok=True)
 
         class SilentYDL(FakeYDL):
-            def download(self, urls):
+            def _write(self):
                 pass          # 什么都没写，也没回调 hook
 
         with patch.object(self.api, "_youtube_dl",
