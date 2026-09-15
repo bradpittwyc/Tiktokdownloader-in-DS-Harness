@@ -56,6 +56,7 @@ if "--self-test" in sys.argv:
         "requests",
         "session_store",
         "profile_pagination",
+        "asset_index",
     ):
         check(f"import:{module_name}", lambda name=module_name: importlib.import_module(name).__name__)
 

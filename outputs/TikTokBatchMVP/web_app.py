@@ -28,6 +28,26 @@ from yt_dlp.networking.impersonate import ImpersonateTarget
 from playwright.sync_api import sync_playwright
 
 from app import clean_profile_url, find_chrome
+# 素材工厂的地基（落盘约定、文件分类、元数据 schema）独立成模块，
+# 好让素材库/转码/切片这些后续功能能脱离 Api 直接引用，也方便离线测试。
+from asset_index import (
+    ASSET_SCHEMA,
+    AUDIO_EXTS,
+    AUDIO_SUFFIX,
+    COVER_SUFFIX,
+    INFO_SUFFIX,
+    MEDIA_EXTS,
+    META_SUFFIX,
+    SUBTITLE_EXTS,
+    VIDEO_EXT_ORDER,
+    build_asset,
+    build_asset_meta,
+    extract_hashtags,
+    index_summary,
+    is_sidecar,
+    sanitize_info,
+    scan_assets,
+)
 from session_store import SessionStore, tiktok_cookies, has_session, chrome_app_bound, dpapi
 
 
@@ -79,75 +99,6 @@ def quality_format(quality):
 CHALLENGE_MARKERS = ("drag the slider to fit the puzzle", "verify to continue",
                      "拖动滑块", "完成下方验证")
 
-MEDIA_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".jpg", ".jpeg", ".png", ".webp"}
-SUBTITLE_EXTS = {".srt", ".vtt", ".ass", ".ttml", ".srv1", ".srv2", ".srv3", ".json"}
-
-# --- 素材工厂的落盘约定 ---------------------------------------------------
-#
-# 封面、原始信息、素材元数据都跟视频同前缀，所以必须显式排除，否则会被
-# 现有的分类逻辑误判，而且两种误判都很隐蔽：
-#
-#   * MEDIA_EXTS 含 .jpg —— 封面会被当成"媒体文件已存在"。下载前的跳过判断
-#     （download 里 `if existing_media:`）会把**根本没下载过**的作品判成
-#     已下载而静默跳过，用户只会看到"全部完成"却没有文件。
-#   * SUBTITLE_EXTS 含 .json —— 元数据会被塞进 subtitles 列表，
-#     让"有字幕就生成学习文档"的判断误触发，然后拿着空的字幕去问模型。
-#
-# 命名统一用"视频名 + 固定后缀"，不占用 yt-dlp 的 <名>.<语言>.<ext> 命名空间。
-COVER_SUFFIX = ".cover.jpg"
-INFO_SUFFIX = ".info.json"
-META_SUFFIX = ".meta.json"
-AUDIO_SUFFIX = ".audio.mp3"
-SIDECAR_SUFFIXES = (COVER_SUFFIX, INFO_SUFFIX, META_SUFFIX, AUDIO_SUFFIX)
-# 视频排在图片前面用：图文帖的 .jpg 和视频同名时，media[0] 必须是视频。
-VIDEO_EXT_ORDER = (".mp4", ".mkv", ".webm", ".mov", ".avi")
-AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".opus", ".ogg", ".wav", ".flac"}
-
-# yt-dlp 的 info 里带着 cookies 和 http_headers。实测（2026-09-13，
-# @nasa/video/7682095989578091790）连**匿名**提取都会带回
-#     ttwid=1%7COEp_3ruJSA...; tt_csrf=...
-# 注入登录态下载时更会带上 sessionid —— 原样落盘等于把登录凭证
-# 写进用户的视频文件夹（那是会被同步、备份、发给别人的目录）。
-SENSITIVE_INFO_KEYS = frozenset({"cookies", "http_headers"})
-
-# 素材元数据的 schema 版本。改字段必须 +1，素材库按这个选解析器。
-ASSET_SCHEMA = 1
-
-HASHTAG_RE = re.compile(r"#([0-9A-Za-z_\u4e00-\u9fff\u3040-\u30ff]+)")
-
-
-def sanitize_info(value):
-    """Strip credential-bearing keys from anything read out of yt-dlp.
-
-    Applied recursively: the top level carries `cookies`, and every entry in
-    `formats` carries its own `http_headers`.
-    """
-    if isinstance(value, dict):
-        return {key: sanitize_info(item) for key, item in value.items()
-                if key not in SENSITIVE_INFO_KEYS}
-    if isinstance(value, list):
-        return [sanitize_info(item) for item in value]
-    return value
-
-
-def extract_hashtags(text):
-    """TikTok 的话题只能从文案里解析。
-
-    yt-dlp 对 TikTok **不提供** tags 字段（实测恒为 None），只在 description
-    里以 #话题 的形式存在，所以素材库要的话题标签必须自己切。
-    """
-    tags, seen = [], set()
-    for match in HASHTAG_RE.findall(str(text or "")):
-        if match.lower() not in seen:
-            seen.add(match.lower())
-            tags.append(match)
-    return tags
-
-
-def is_sidecar(path):
-    """True for the files this app writes next to the media (cover/info/meta)."""
-    return str(path).lower().endswith(SIDECAR_SUFFIXES)
-
 
 def upload_date_matches(stamp, name):
     """True when a filename carries this video's upload date.
@@ -169,82 +120,6 @@ def upload_date_matches(stamp, name):
                for offset in (1, -1))
 
 
-def build_asset_meta(info, item=None, files=None):
-    """素材库读的那一份元数据。
-
-    刻意跟 yt-dlp 的原始 info 分开：原始 info 有 62 个字段、还会随 yt-dlp
-    版本变，而素材库需要一个**稳定**的结构。字段名固定，改就要升 ASSET_SCHEMA。
-
-    取值优先用 yt-dlp 刚拿到的 info（最新、最准），退回抓取阶段的 item
-    （离线补写、或 yt-dlp 这次没给出的字段）。
-    """
-    info = info or {}
-    item = item or {}
-    files = files or {}
-
-    def pick(*values):
-        for value in values:
-            if value not in (None, "", [], {}):
-                return value
-        return None
-
-    description = pick(info.get("description"), info.get("title"), item.get("title")) or ""
-    width = pick(info.get("width"), item.get("width"))
-    height = pick(info.get("height"), item.get("height"))
-    timestamp = pick(info.get("timestamp"), item.get("timestamp"))
-    created_at = ""
-    if timestamp:
-        try:
-            created_at = datetime.datetime.fromtimestamp(int(timestamp)).isoformat(timespec="seconds")
-        except (ValueError, TypeError, OSError, OverflowError):
-            created_at = ""
-    return {
-        "schema": ASSET_SCHEMA,
-        "id": str(pick(info.get("id"), item.get("id")) or ""),
-        "url": pick(info.get("webpage_url"), item.get("url")) or "",
-        "type": item.get("type") or "video",
-        "title": pick(info.get("title"), item.get("title")) or "",
-        "description": description,
-        "author": {
-            "username": pick(info.get("uploader"), item.get("author")) or "",
-            "nickname": pick(info.get("channel"), item.get("nickname")) or "",
-            "id": str(pick(info.get("uploader_id")) or ""),
-            "url": pick(info.get("uploader_url")) or "",
-        },
-        "created_at": created_at,
-        "upload_date": pick(info.get("upload_date"), item.get("upload_date")) or "",
-        "duration": pick(info.get("duration"), item.get("duration")),
-        "video": {
-            "width": width,
-            "height": height,
-            "resolution": pick(info.get("resolution"),
-                               f"{width}x{height}" if width and height else None),
-            "aspect_ratio": info.get("aspect_ratio"),
-            "format_id": info.get("format_id"),
-            "ext": info.get("ext"),
-            "vcodec": info.get("vcodec"),
-            "acodec": info.get("acodec"),
-            "dynamic_range": info.get("dynamic_range"),
-            "filesize": pick(info.get("filesize"), info.get("filesize_approx")),
-            "tbr": info.get("tbr"),
-        },
-        "stats": {
-            "views": pick(info.get("view_count"), item.get("views")),
-            "likes": pick(info.get("like_count"), item.get("likes")),
-            "comments": pick(info.get("comment_count"), item.get("comments")),
-            "shares": pick(info.get("repost_count"), item.get("shares")),
-            "saves": info.get("save_count"),
-        },
-        # TikTok 没有 tags 字段，只能从文案切。
-        "hashtags": extract_hashtags(description),
-        "music": {"title": info.get("track") or "", "artist": info.get("artist") or ""},
-        # 全部是文件名，不含路径 —— 整个素材库目录可以整体搬走。
-        "files": files,
-        "source": {
-            "extractor": pick(info.get("extractor_key"), "TikTok"),
-            "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        },
-    }
 
 
 def page_challenged(page):
@@ -306,6 +181,8 @@ class Api:
         self._profile_stats = {}
         self._pause_downloads = threading.Event()
         self._cancel_downloads = threading.Event()
+        # 补齐素材是独立的长任务，用自己的取消信号，不去搅下载队列那个。
+        self._asset_cancel = threading.Event()
         self._cookie_file = ""
         self._cookie_browser = ""
         self._cookie_error = ""
@@ -1309,6 +1186,101 @@ class Api:
         if not produced:
             raise RuntimeError("没有生成音频文件")
         return produced[0]
+
+    # --- 素材库：索引与补齐 ---------------------------------------------
+
+    def scan_assets(self, folder, recursive=True):
+        """扫一个目录，返回素材索引与摘要。**纯本地，不联网。**"""
+        assets, problems = scan_assets(folder, recursive=recursive)
+        rows = [{"folder": asset["folder"], "stem": asset["stem"], "type": asset["type"],
+                 "media": asset["media"], "gaps": asset["gaps"],
+                 "subtitles": len(asset.get("subtitles") or [])}
+                for asset in assets if asset["gaps"]]
+        row_cap = 400
+        return {
+            "ok": True, "folder": str(folder),
+            "summary": index_summary(assets),
+            "incomplete": rows[:row_cap],
+            "truncated": max(0, len(rows) - row_cap),
+            "problems": problems,
+        }
+
+    def cancel_asset_backfill(self):
+        self._asset_cancel.set()
+        return {"ok": True}
+
+    def backfill_assets(self, folder, username, with_audio=True, limit=0):
+        """给**已经下载过**的作品补上缺的附属文件（封面/音频/原始信息/元数据）。
+
+        为什么必须按博主来：`<名>.mp4` 里没有作品 id（默认命名模板不含
+        %(id)s），光看文件名推不出 TikTok 链接。所以拿本机归档里
+        `cache/<博主>.json` 的 url，再用跟下载时同一套 `_files_for_item`
+        把作品和文件对上。
+
+        每条要重新提取一次视频信息，所以是联网操作。逐条上报
+        `assetBackfill` 事件，可以取消。
+        """
+        if not str(folder or "").strip():
+            return {"ok": False, "error": "请先选择保存目录"}
+        safe = re.sub(r'[<>:"/\\|?*]', "_", str(username or "")).strip(" .")
+        if not safe:
+            return {"ok": False, "error": "缺少博主名，无法定位归档"}
+        target = Path(folder).expanduser() / f"@{safe}"
+        if not target.is_dir():
+            return {"ok": False, "error": f"目录不存在：{target}"}
+        videos = self._load_profile_archive(safe).get("videos") or []
+        if not videos:
+            return {"ok": False, "error": f"本机没有 @{safe} 的归档记录，补不了（它不知道作品链接）"}
+
+        self._asset_cancel.clear()
+        base_options = {"quiet": True, "no_warnings": True, "noplaylist": True,
+                        "socket_timeout": 20, "retries": 1, "windowsfilenames": True,
+                        "impersonate": ImpersonateTarget.from_str("chrome")}
+        self._apply_cookie_options(base_options)
+        info_options = dict(base_options, skip_download=True)
+
+        done, skipped, failed, examined = 0, 0, [], 0
+        try:
+            for index, item in enumerate(videos, 1):
+                if self._asset_cancel.is_set():
+                    break
+                self._emit("assetBackfill", {"current": index, "total": len(videos),
+                                             "id": item.get("id"), "state": "working"})
+                try:
+                    media_files, _ = self._files_for_item(target, item["id"], item)
+                    if not media_files:
+                        continue
+                    asset = build_asset(target, media_files[0])
+                    if not asset["gaps"]:
+                        continue
+                    examined += 1
+                    if limit and done >= int(limit):
+                        continue
+                    info = {}
+                    try:
+                        with self._youtube_dl(info_options) as ydl:
+                            info = sanitize_info(ydl.extract_info(item["url"], download=False) or {})
+                    except Exception as exc:
+                        # 提取不到就只补能补的（用归档里的 item 数据写 meta）
+                        log_event(f"补齐时提取信息失败 {item.get('id')}: {exc}")
+                    audio_path = None
+                    if with_audio and "audio" in asset["gaps"]:
+                        try:
+                            audio_path = self._download_audio(target, asset["media"], item,
+                                                              info, base_options)
+                        except Exception as exc:
+                            log_event(f"补齐音频失败 {item.get('id')}: {exc}")
+                    self._write_asset_sidecars(target, asset["media"], info, item,
+                                               asset["subtitles"], audio_path)
+                    done += 1
+                except Exception as exc:
+                    failed.append({"id": item.get("id"), "error": str(exc)})
+        finally:
+            self._emit("assetBackfill", {"done": True, "updated": done,
+                                         "failed": len(failed), "total": len(videos)})
+        return {"ok": True, "updated": done, "examined": examined,
+                "failed": failed, "folder": str(target),
+                "cancelled": self._asset_cancel.is_set()}
 
     def _emit(self, function, value):
         if self._window:

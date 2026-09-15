@@ -24,7 +24,8 @@ datas = [(str(APP / "ui"), "ui"),
          # 运行期要用它判断"当前版本"，自动升级靠这个和 release 比对
          (str(APP / "VERSION"), ".")]
 binaries = []
-hiddenimports = ["webview.platforms.edgechromium", "session_store", "profile_pagination"]
+hiddenimports = ["webview.platforms.edgechromium", "session_store", "profile_pagination",
+                 "asset_index"]
 for package in ("yt_dlp", "curl_cffi", "playwright", "webview", "docx"):
     package_datas, package_binaries, package_imports = collect_all(package)
     datas.extend(package_datas)
