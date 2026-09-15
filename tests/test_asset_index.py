@@ -18,10 +18,12 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "outputs/TikTokBatchMVP"))
 from asset_index import (  # noqa: E402
+    DESC_LIMIT,
     build_asset,
     build_post_asset,
     index_summary,
     is_post_folder,
+    library_rows,
     load_meta,
     media_files,
     scan_assets,
@@ -341,6 +343,72 @@ class BackfillTests(unittest.TestCase):
         self.assertLess(len(calls), 5, "取消之后不该继续走完全部作品")
 
 
+class LibraryRowTests(unittest.TestCase):
+    """素材行：把磁盘实际情况 + meta.json 压成前端检索用的扁平记录。"""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        self.media = make(self.folder, f"{TITLE}_{STAMP}.mp4")
+
+    def asset_with(self, meta):
+        if meta is not None:
+            make(self.folder, f"{TITLE}_{STAMP}.meta.json",
+                 json.dumps(meta, ensure_ascii=False).encode("utf-8"))
+        return build_asset(self.folder, self.media)
+
+    def test_a_missing_meta_still_produces_a_usable_row(self):
+        # 还没补齐的素材也必须能出现在列表里，否则用户根本看不到它们
+        rows = library_rows([self.asset_with(None)])
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["hasMeta"])
+        self.assertEqual(rows[0]["title"], f"{TITLE}_{STAMP}")   # 退回文件名
+        self.assertEqual(rows[0]["gaps"], ["cover", "audio", "info", "meta"])
+
+    def test_it_flattens_the_nested_meta(self):
+        asset = self.asset_with({
+            "schema": 1, "id": "111", "title": "Moon landing", "upload_date": "20260905",
+            "duration": 66, "hashtags": ["Moon", "Artemis"],
+            "description": "summer winds down",
+            "author": {"username": "nasa", "nickname": "NASA"},
+            "stats": {"views": 341100, "likes": 31900, "comments": 12, "shares": 30},
+            "video": {"resolution": "720x1280"},
+        })
+        row = library_rows([asset])[0]
+        self.assertTrue(row["hasMeta"])
+        self.assertEqual(row["id"], "111")
+        self.assertEqual(row["author"], "nasa")
+        self.assertEqual(row["nickname"], "NASA")
+        self.assertEqual(row["views"], 341100)
+        self.assertEqual(row["likes"], 31900)
+        self.assertEqual(row["resolution"], "720x1280")
+        self.assertEqual(row["hashtags"], ["Moon", "Artemis"])
+
+    def test_a_broken_meta_falls_back_instead_of_raising(self):
+        make(self.folder, f"{TITLE}_{STAMP}.meta.json", b"{not json")
+        rows = library_rows([build_asset(self.folder, self.media)])
+        self.assertFalse(rows[0]["hasMeta"])
+        self.assertEqual(rows[0]["title"], f"{TITLE}_{STAMP}")
+
+    def test_the_description_is_capped_so_the_payload_stays_small(self):
+        asset = self.asset_with({"title": "x", "description": "长" * 5000})
+        row = library_rows([asset])[0]
+        self.assertEqual(len(row["desc"]), DESC_LIMIT)
+
+    def test_a_photo_post_row_keeps_its_id_and_type(self):
+        make(self.folder, "Post_20260905_[333]/01.jpg")
+        assets, _ = scan_assets(self.folder)
+        # 这个目录里还有 setUp 建的视频，所以按类型挑而不是按下标取
+        row = next(r for r in library_rows(assets) if r["type"] == "image")
+        self.assertEqual(row["id"], "333")
+
+    def test_the_whole_payload_is_json_serialisable(self):
+        make(self.folder, f"{TITLE}_{STAMP}.cover.jpg")
+        rows = library_rows([build_asset(self.folder, self.media)])
+        json.dumps(rows, ensure_ascii=False)
+
+
 class ScanApiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -351,20 +419,32 @@ class ScanApiTests(unittest.TestCase):
         self.api = Api()
         self.root = Path(self.temp.name) / "downloads"
 
-    def test_it_returns_a_summary_and_only_the_incomplete_assets(self):
+    def test_it_returns_every_asset_not_only_the_incomplete_ones(self):
+        # 检索要在整库上做，只给"待补的"会让搜索看起来漏东西
         make(self.root, "@a/one_20260101.mp4")
         make(self.root, "@a/two_20260102.mp4")
-        make(self.root, "@a/two_20260102.cover.jpg")
-        make(self.root, "@a/two_20260102.audio.mp3")
-        make(self.root, "@a/two_20260102.info.json")
-        make(self.root, "@a/two_20260102.meta.json")
+        for suffix in (".cover.jpg", ".audio.mp3", ".info.json", ".meta.json"):
+            make(self.root, f"@a/two_20260102{suffix}")
         result = self.api.scan_assets(str(self.root))
         self.assertTrue(result["ok"])
         self.assertEqual(result["summary"]["total"], 2)
         self.assertEqual(result["summary"]["complete"], 1)
-        self.assertEqual(len(result["incomplete"]), 1)
-        self.assertEqual(result["incomplete"][0]["stem"], "one_20260101")
-        self.assertEqual(result["truncated"], 0)
+        stems = sorted(row["stem"] for row in result["rows"])
+        self.assertEqual(stems, ["one_20260101", "two_20260102"])
+        one = next(row for row in result["rows"] if row["stem"] == "one_20260101")
+        self.assertEqual(one["gaps"], ["cover", "audio", "info", "meta"])
+        two = next(row for row in result["rows"] if row["stem"] == "two_20260102")
+        self.assertEqual(two["gaps"], [])
+
+    def test_it_reads_the_meta_into_the_rows(self):
+        make(self.root, "@a/one_20260101.mp4")
+        make(self.root, "@a/one_20260101.meta.json", json.dumps(
+            {"title": "标题", "author": {"username": "nasa"}, "stats": {"views": 5}},
+            ensure_ascii=False).encode("utf-8"))
+        row = self.api.scan_assets(str(self.root))["rows"][0]
+        self.assertEqual(row["title"], "标题")
+        self.assertEqual(row["author"], "nasa")
+        self.assertEqual(row["views"], 5)
 
     def test_the_payload_is_json_serialisable(self):
         make(self.root, "@a/one_20260101.mp4")

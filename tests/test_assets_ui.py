@@ -1,9 +1,12 @@
 """素材库弹窗的真实浏览器测试。
 
 真 Chrome + 假 `window.pywebview.api` + 全网络阻断，断言零 JS 运行时错误。
-重点锁接线：扫描要调到后端、摘要是真数据、没有博主时补齐必须被拦住
-（文件名里没有作品 id，不知道链接就没法补），以及后端推送的
-`assetBackfill` 事件要能驱动界面文字。
+
+重点锁三件事：
+1. 扫描/补齐的接线（目录、用户名要传对）
+2. **检索、排序、筛选全在本地做** —— 敲键不发请求（发一次就多一次延迟，
+   而且断网就用不了）
+3. 没有博主时补齐必须被拦住（文件名里没有作品 id，不知道链接就没法补）
 """
 
 import json
@@ -17,19 +20,37 @@ from playwright.sync_api import sync_playwright
 
 UI_PATH = Path(__file__).resolve().parents[1] / "outputs/TikTokBatchMVP/ui/index.html"
 
+ROWS = [
+    {"folder": "F:\\TikTok\\@nasa", "stem": "We are going back_20260905", "type": "video",
+     "media": "F:\\TikTok\\@nasa\\We are going back_20260905.mp4",
+     "gaps": ["cover", "audio", "info", "meta"], "subtitles": 0,
+     "id": "111", "title": "We are going back to the Moon", "author": "nasa",
+     "nickname": "NASA", "date": "20260905", "duration": 66, "views": 341100,
+     "likes": 31900, "comments": 12, "shares": 30, "hashtags": ["Moon", "Artemis"],
+     "resolution": "720x1280", "desc": "Summer winds down #Moon", "hasMeta": False},
+    {"folder": "F:\\TikTok\\@nasa", "stem": "Midnight pasta_20260906", "type": "video",
+     "media": "F:\\TikTok\\@nasa\\Midnight pasta_20260906.mp4",
+     "gaps": [], "subtitles": 1,
+     "id": "222", "title": "Midnight pasta experiment", "author": "chef",
+     "nickname": "Chef Ann", "date": "20260906", "duration": 30, "views": 1200,
+     "likes": 90, "comments": 1, "shares": 2, "hashtags": ["food"],
+     "resolution": "1080x1920", "desc": "a midnight snack #food", "hasMeta": True},
+    {"folder": "F:\\TikTok\\@nasa", "stem": "Photo set_20260907_[333]", "type": "image",
+     "media": "F:\\TikTok\\@nasa\\Photo set_20260907_[333]",
+     "gaps": ["meta"], "subtitles": 0,
+     "id": "333", "title": "Photo set from Tokyo", "author": "taro", "nickname": "Taro",
+     "date": "20260907", "duration": None, "views": 88000, "likes": 7000,
+     "comments": 3, "shares": 8, "hashtags": [], "resolution": "",
+     "desc": "Tokyo streets", "hasMeta": False},
+]
+
 SCAN_RESULT = {
     "ok": True, "folder": "F:\\TikTok",
-    "summary": {"total": 51, "complete": 0, "incomplete": 51, "byGap": {"cover": 50},
-                "bytes": 183897779, "videos": 50, "posts": 1},
-    "incomplete": [
-        {"folder": "F:\\TikTok\\@nasa", "stem": "Clip One_20260905", "type": "video",
-         "media": "F:\\TikTok\\@nasa\\Clip One_20260905.mp4",
-         "gaps": ["cover", "audio", "info", "meta"], "subtitles": 0},
-        {"folder": "F:\\TikTok\\@nasa", "stem": "Clip Two_20260906", "type": "video",
-         "media": "F:\\TikTok\\@nasa\\Clip Two_20260906.mp4",
-         "gaps": ["meta"], "subtitles": 1},
-    ],
-    "truncated": 0, "problems": [],
+    "summary": {"total": 3, "complete": 1, "incomplete": 2,
+                "byGap": {"cover": 1, "audio": 1, "info": 1, "meta": 2},
+                "bytes": 183897779, "videos": 2, "posts": 1},
+    "rows": ROWS,
+    "problems": [],
 }
 
 BRIDGE = """
@@ -44,7 +65,7 @@ window.pywebview = {api:(()=>{
     choose_folder: async()=>{window.calls.push('choose_folder');return 'F:\\\\TikTok'},
     recent_profiles: async()=>[], refresh_recent_profiles: async()=>({ok:true,profiles:[]}),
     load_task_state: async()=>({ok:true,records:{}}), enrich: async()=>({updated:0}),
-    get_update_info: async()=>({ok:true,current:'1.1.0',tokenSet:false}),
+    get_update_info: async()=>({ok:true,current:'1.2.0',tokenSet:false}),
     set_cookie_options: async()=>({ok:true,hasSession:false}),
     get_cookie_status: async()=>({ok:true,hasSession:false}),
     get_filename_template: async()=>'', get_learning_options: async()=>({})
@@ -99,6 +120,15 @@ class AssetsUITest(unittest.TestCase):
         self.page.locator("#assetsButton").click()
         self.page.wait_for_selector("#assetsModal:not(.hidden)")
 
+    def listing(self):
+        return self.page.locator("#assetsList").inner_text()
+
+    def search(self, text):
+        self.page.fill("#assetsQuery", text)
+        self.page.wait_for_timeout(250)      # 防抖 120ms
+
+    # --- 接线 ---------------------------------------------------------
+
     def test_the_modal_opens_and_scans_the_remembered_folder(self):
         self.set_folder()
         self.open_modal()
@@ -106,25 +136,150 @@ class AssetsUITest(unittest.TestCase):
         self.assertIn(r"scan_assets:F:\TikTok", self.page.evaluate("window.calls"))
         self.assertEqual(self.errors, [])
 
-    def test_the_summary_and_the_gap_list_come_from_the_backend(self):
+    def test_it_lists_every_asset_not_only_the_incomplete_ones(self):
         self.set_folder()
         self.open_modal()
         self.page.wait_for_function(
-            "document.getElementById('assetsSummary').textContent.includes('51')")
-        summary = self.page.locator("#assetsSummary").inner_text()
-        self.assertIn("共 51 条素材", summary)
-        self.assertIn("待补 51 条", summary)
-        listing = self.page.locator("#assetsList").inner_text()
-        self.assertIn("Clip One_20260905", listing)
-        self.assertIn("封面", listing)
-        self.assertIn("元数据", listing)
+            "document.getElementById('assetsSummary').textContent.includes('共 3 条素材')")
+        self.assertIn("完整 1 / 待补 2", self.page.locator("#assetsSummary").inner_text())
+        listing = self.listing()
+        for title in ("We are going back to the Moon", "Midnight pasta experiment",
+                      "Photo set from Tokyo"):
+            self.assertIn(title, listing)
+
+    def test_each_row_shows_the_creator_date_duration_and_gap(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        listing = self.listing()
+        self.assertIn("nasa", listing)
+        self.assertIn("20260905", listing)
+        self.assertIn("66s", listing)
+        self.assertIn("34.1万播放", listing)
+        self.assertIn("缺 封面、音频、原始信息、元数据", listing)
+
+    # --- 本地检索 -----------------------------------------------------
+
+    def test_search_matches_the_title(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.search("pasta")
+        listing = self.listing()
+        self.assertIn("Midnight pasta experiment", listing)
+        self.assertNotIn("We are going back to the Moon", listing)
+        self.assertIn("当前显示 1 条", self.page.locator("#assetsSummary").inner_text())
+
+    def test_search_matches_the_description_and_hashtags_and_author(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.search("artemis")                       # 话题
+        self.assertIn("We are going back to the Moon", self.listing())
+        self.search("midnight snack")                # 文案（两个词都只在这条里）
+        self.assertIn("Midnight pasta experiment", self.listing())
+        self.search("taro")                          # 作者
+        self.assertIn("Photo set from Tokyo", self.listing())
+        self.assertNotIn("Midnight pasta", self.listing())
+
+    def test_multiple_terms_all_have_to_match(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.search("moon pasta")                    # 没有任何一条同时含这两个词
+        self.assertIn("没有匹配的素材", self.listing())
+
+    def test_search_is_case_insensitive(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.search("MOON")
+        self.assertIn("We are going back to the Moon", self.listing())
+
+    def test_searching_never_calls_the_backend_again(self):
+        # 检索必须在本地做完，否则每敲一个字都要等一次往返
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("window.calls.some(c=>c.startsWith('scan_assets'))")
+        self.page.evaluate("window.calls=[]")
+        self.search("pasta")
+        self.search("moon")
+        self.assertEqual(self.page.evaluate(
+            "window.calls.filter(c=>c.startsWith('scan_assets')).length"), 0)
+
+    def test_no_query_restores_the_full_list(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.search("pasta")
+        self.assertNotIn("Photo set", self.listing())
+        self.search("")
+        self.assertIn("Photo set from Tokyo", self.listing())
+
+    # --- 排序与筛选 ---------------------------------------------------
+
+    def test_sorting_by_views_puts_the_biggest_first(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.page.select_option("#assetsSort", "views")
+        self.page.wait_for_timeout(100)
+        listing = self.listing()
+        self.assertLess(listing.index("We are going back to the Moon"),
+                        listing.index("Photo set from Tokyo"))
+        self.assertLess(listing.index("Photo set from Tokyo"),
+                        listing.index("Midnight pasta"))
+
+    def test_sorting_by_duration_is_descending(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.page.select_option("#assetsSort", "duration")
+        self.page.wait_for_timeout(100)
+        listing = self.listing()
+        self.assertLess(listing.index("We are going back to the Moon"),
+                        listing.index("Midnight pasta"))
+
+    def test_the_type_filter_narrows_to_photo_posts(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.page.select_option("#assetsType", "image")
+        self.page.wait_for_timeout(100)
+        listing = self.listing()
+        self.assertIn("Photo set from Tokyo", listing)
+        self.assertNotIn("Midnight pasta", listing)
+
+    def test_the_gaps_filter_shows_only_what_needs_backfilling(self):
+        self.set_folder()
+        self.open_modal()
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
+        self.page.check("#assetsOnlyGaps")
+        self.page.wait_for_timeout(100)
+        listing = self.listing()
+        self.assertIn("We are going back to the Moon", listing)
+        self.assertNotIn("Midnight pasta", listing)      # 这条是完整的
+
+    def test_the_backfill_button_follows_the_current_filter(self):
+        # 只看待补时，按钮就该是在补"这批"；筛到一条都不缺时它该灰掉
+        self.set_folder()
+        self.page.evaluate("currentUsername='nasa'")
+        self.open_modal()
+        self.page.wait_for_function("!document.getElementById('assetsBackfill').disabled")
+        self.page.check("#assetsOnlyGaps")
+        self.page.wait_for_timeout(100)
+        self.assertFalse(self.page.locator("#assetsBackfill").is_disabled())
+        self.search("pasta")                              # 只剩那条完整的
+        self.assertTrue(self.page.locator("#assetsBackfill").is_disabled(),
+                        "筛出来的都不缺文件时不该还能点补齐")
+
+    # --- 补齐与错误处理 -----------------------------------------------
 
     def test_backfill_is_blocked_until_we_know_which_creator(self):
         # 文件名里没有作品 id，不知道链接就没法补 —— 必须拦住而不是空跑
         self.set_folder()
         self.open_modal()
-        self.page.wait_for_function(
-            "document.getElementById('assetsList').textContent.includes('Clip One')")
+        self.page.wait_for_function("document.getElementById('assetsList').textContent.includes('Moon')")
         self.assertTrue(self.page.locator("#assetsBackfill").is_disabled(),
                         "不知道博主时按钮就该是灰的")
         # 禁用按钮点不动，所以直接调函数验证兜底那一层
@@ -139,8 +294,7 @@ class AssetsUITest(unittest.TestCase):
         self.set_folder()
         self.page.evaluate("currentUsername='nasa'")
         self.open_modal()
-        self.page.wait_for_function(
-            "!document.getElementById('assetsBackfill').disabled")
+        self.page.wait_for_function("!document.getElementById('assetsBackfill').disabled")
         self.page.locator("#assetsBackfill").click()
         self.page.wait_for_function(
             "window.calls.some(c=>c.startsWith('backfill_assets'))")

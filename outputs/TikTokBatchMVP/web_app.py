@@ -45,6 +45,7 @@ from asset_index import (
     extract_hashtags,
     index_summary,
     is_sidecar,
+    library_rows,
     sanitize_info,
     scan_assets,
 )
@@ -1190,18 +1191,18 @@ class Api:
     # --- 素材库：索引与补齐 ---------------------------------------------
 
     def scan_assets(self, folder, recursive=True):
-        """扫一个目录，返回素材索引与摘要。**纯本地，不联网。**"""
+        """扫一个目录，返回素材索引与摘要。**纯本地，不联网。**
+
+        一次把整份「素材行」交给前端（含 meta.json 里的标题/作者/话题/播放量），
+        搜索和排序都由前端在本地做 —— 每次敲键都往返一次后端没有必要，
+        而且断网也能用。
+        """
         assets, problems = scan_assets(folder, recursive=recursive)
-        rows = [{"folder": asset["folder"], "stem": asset["stem"], "type": asset["type"],
-                 "media": asset["media"], "gaps": asset["gaps"],
-                 "subtitles": len(asset.get("subtitles") or [])}
-                for asset in assets if asset["gaps"]]
-        row_cap = 400
+        rows = library_rows(assets)
         return {
             "ok": True, "folder": str(folder),
             "summary": index_summary(assets),
-            "incomplete": rows[:row_cap],
-            "truncated": max(0, len(rows) - row_cap),
+            "rows": rows,
             "problems": problems,
         }
 

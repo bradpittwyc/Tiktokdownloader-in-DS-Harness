@@ -307,6 +307,52 @@ def load_meta(path):
         return None
 
 
+# 检索时一条素材会整条塞给前端（前端在本地做搜索/排序，没有往返延迟）。
+# 描述可能很长，截断到这么多字符：足够搜到内容，又不至于让 payload 爆掉。
+DESC_LIMIT = 500
+
+
+def library_row(asset, meta):
+    """把「磁盘上的素材」和「meta.json」压成一行扁平记录，给前端检索用。
+
+    字段全部是可 JSON 序列化的标量 —— 前端拿到就能直接 `String(...).includes()`，
+    不用再解一层嵌套。
+    """
+    meta = meta or {}
+    author = meta.get("author") or {}
+    stats = meta.get("stats") or {}
+    video = meta.get("video") or {}
+    return {
+        "folder": asset["folder"],
+        "stem": asset["stem"],
+        "type": asset["type"],
+        "media": asset["media"],
+        "gaps": asset["gaps"],
+        "subtitles": len(asset.get("subtitles") or []),
+        # 没有 meta 的素材（还没补齐）也要能在列表里看到，所以这些字段全部可空。
+        "id": str(meta.get("id") or asset.get("id") or ""),
+        "title": meta.get("title") or asset["stem"],
+        "author": author.get("username") or "",
+        "nickname": author.get("nickname") or "",
+        "date": str(meta.get("upload_date") or ""),
+        "duration": meta.get("duration"),
+        "views": stats.get("views"),
+        "likes": stats.get("likes"),
+        "comments": stats.get("comments"),
+        "shares": stats.get("shares"),
+        "hashtags": list(meta.get("hashtags") or []),
+        "resolution": video.get("resolution") or "",
+        "desc": str(meta.get("description") or "")[:DESC_LIMIT],
+        "hasMeta": bool(meta),
+    }
+
+
+def library_rows(assets):
+    """扫描结果 + 各自的 meta.json → 前端检索用的行。"""
+    return [library_row(asset, load_meta(asset["meta"]) if asset.get("meta") else None)
+            for asset in assets]
+
+
 def index_summary(assets):
     """给界面看的一行摘要。"""
     by_gap = Counter()
