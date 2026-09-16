@@ -18,6 +18,13 @@ from .ai_enrichment import (  # noqa: F401
     normalize_enrichment,
 )
 from .transcript import transcript_from_subtitle_file, transcribe_media, ASRUnavailable  # noqa: F401
+from .asr import (  # noqa: F401
+    TranscriptError,
+    TranscriptErrorCode,
+    TranscriptResult,
+    TranscriptService,
+    TranscriptSource,
+)
 from .pipeline import ContentPipeline  # noqa: F401
 from .mock_data import seed_demo_items  # noqa: F401
 from .errors_feed import recent_errors  # noqa: F401

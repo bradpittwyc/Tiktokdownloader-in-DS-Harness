@@ -7,6 +7,9 @@
 为什么要「批量入队 + 逐条处理」：AI 标注是网络请求，可能几十秒一条。
 界面要能显示「待分析 / 分析中 / 已完成 / 失败」，所以每次状态变化都要回报；
 单条失败不能让整批停摆（用户明确要求失败可重试）。
+
+转写那一段（字幕优先 → 没有字幕才 ASR）已经独立成 `content_factory.asr`
+（ASR Core）。这里只保留接线与原签名，语义与以前完全一致。
 """
 
 import threading
@@ -14,6 +17,7 @@ import time
 from pathlib import Path
 
 from .ai_enrichment import EnrichmentError, EnrichmentService
+from .asr import TranscriptService
 from .transcript import (ASRUnavailable, asr_available, clean_transcript,
                          find_subtitle_for, pick_subtitle_path, transcribe_media,
                          transcript_from_subtitle_file)
@@ -36,6 +40,12 @@ class ContentPipeline:
         self._downloader = downloader          # web_app.Api，用于复用下载能力
         self._transcribe = transcribe or transcribe_media
         self._enricher = EnrichmentService(settings)
+        # 转写阶段已经独立成 content_factory.asr（字幕优先 → 本机 ASR → 外部 provider），
+        # 这里只做接线：注入的 transcribe / asr_available 都透传下去，行为与以前一致。
+        self._transcripts = TranscriptService(
+            store, settings, emit=self._on_transcript_event,
+            transcriber=lambda media, **kwargs: self._transcribe(media, **kwargs),
+            asr_probe=lambda: asr_available())
         self._cancel = threading.Event()
         self._busy = threading.Lock()
         self._queue = []
@@ -43,6 +53,13 @@ class ContentPipeline:
     # ---- 进度回报 ------------------------------------------------------
     def set_emit(self, emit):
         self._emit = emit or (lambda *_args, **_kwargs: None)
+
+    def _on_transcript_event(self, event):
+        """把 ASR Core 的进度事件转成界面已有的 enrichProgress（stage=transcript）。"""
+        extra = {key: value for key, value in (event or {}).items()
+                 if key not in {"id", "state", "message", "stage"}}
+        self._report((event or {}).get("id") or "", (event or {}).get("state") or "running",
+                     (event or {}).get("message") or "", stage="transcript", **extra)
 
     def _report(self, item_id, state, message="", stage="enrich", **extra):
         payload = {"id": item_id, "state": state, "message": message, "stage": stage,
@@ -115,68 +132,32 @@ class ContentPipeline:
         return {"ok": True, "imported": len(ids), "ids": ids, "folder": str(root)}
 
     # ---- 转写 ----------------------------------------------------------
+    def transcribe_item(self, item_id, allow_asr=True, force=False):
+        """结构化转写入口：返回 content_factory.asr.TranscriptResult。
+
+        需要错误码 / 是否可重试 / 来源（字幕 or ASR）时用这个；
+        只要「成没成 + 文本 + 原因」的旧调用方继续用 ensure_transcript。
+        """
+        return self._transcripts.transcribe(item_id, allow_asr=allow_asr, force=force)
+
+    def retry_transcript(self, item_id, allow_asr=True, force=False):
+        """转写失败后重试（done 的内容默认不重跑，force=True 才重跑）。"""
+        return self._transcripts.retry(item_id, allow_asr=allow_asr, force=force)
+
+    def transcribe_status(self, item_id):
+        """当前转写状态 + 结构化错误（重启后仍可读，来自内容库与运行记录）。"""
+        return self._transcripts.status(item_id)
+
     def ensure_transcript(self, item_id, allow_asr=True):
-        """返回 (是否成功, transcript文本, 失败原因)。"""
-        item = self.store.item(item_id)
-        if not item:
-            return False, "", "内容不存在"
-        if str(item.get("transcript_text") or "").strip():
-            return True, item["transcript_text"], ""
+        """返回 (是否成功, transcript文本, 失败原因)。
 
-        self.store.update_item(item_id, transcript_status="running")
-        self._report(item_id, "running", "正在获取字幕文本…", stage="transcript")
-
-        # 1) 已记录的字幕文件
-        text = transcript_from_subtitle_file(item.get("local_subtitle_path") or "")
-        # 2) 媒体文件旁边的字幕
-        if not text and item.get("local_video_path"):
-            sibling = find_subtitle_for(item["local_video_path"])
-            if sibling:
-                text = transcript_from_subtitle_file(sibling)
-                if text:
-                    self.store.update_item(item_id, local_subtitle_path=str(sibling))
-        if text:
-            self.store.update_item(item_id, transcript_text=text, transcript_status="done",
-                                   last_error="")
-            self._report(item_id, "running", f"字幕文本已就绪（{len(text)} 字符）",
-                         stage="transcript", transcriptChars=len(text))
-            return True, text, ""
-
-        if not allow_asr:
-            self.store.update_item(item_id, transcript_status="failed",
-                                   last_error="该内容没有字幕轨，且已关闭语音识别")
-            return False, "", "该内容没有字幕轨，且已关闭语音识别"
-
-        media = item.get("local_video_path") or ""
-        # 先判 ASR 后端再判媒体文件：两者都缺时，前者是更根本的原因
-        # （没装识别后端 = 这条路走不通；没下载 = 还能先补下载）。
-        if not asr_available():
-            reason = ("本机未安装语音识别后端（faster-whisper / openai-whisper），"
-                      "该视频也没有字幕轨；请安装识别后端，或改用手工粘贴字幕文本")
-            self.store.update_item(item_id, transcript_status="failed", last_error=reason)
-            self._report(item_id, "failed", reason, stage="transcript")
-            return False, "", reason
-        if not media:
-            reason = "内容尚未下载到本地，没有可用于转写的媒体文件"
-            self.store.update_item(item_id, transcript_status="failed", last_error=reason)
-            self._report(item_id, "failed", reason, stage="transcript")
-            return False, "", reason
-        try:
-            self._report(item_id, "running", "正在语音识别（ASR）…", stage="transcript")
-            text = self._transcribe(media)
-        except ASRUnavailable as exc:
-            self.store.update_item(item_id, transcript_status="failed", last_error=str(exc))
-            self._report(item_id, "failed", str(exc), stage="transcript")
-            return False, "", str(exc)
-        if not text:
-            reason = "语音识别没有返回可用文本"
-            self.store.update_item(item_id, transcript_status="failed", last_error=reason)
-            self._report(item_id, "failed", reason, stage="transcript")
-            return False, "", reason
-        self.store.update_item(item_id, transcript_text=text, transcript_status="done", last_error="")
-        self._report(item_id, "running", f"语音识别完成（{len(text)} 字符）",
-                     stage="transcript", transcriptChars=len(text))
-        return True, text, ""
+        实现已经搬到 content_factory.asr.TranscriptService（见 asr/service.py）：
+        字幕优先 → 没有字幕才 ASR → 外部 provider。这里保留原签名与返回形状，
+        调用方（enrich_one / 界面）一行都不用改；失败原因就是结构化错误的人话文案。
+        """
+        result = self._transcripts.transcribe(item_id, allow_asr=allow_asr)
+        reason = result.error.message if result.error else ""
+        return result.ok, result.text, reason
 
     def set_transcript(self, item_id, text):
         """人工粘贴 / 编辑字幕文本，仍然算真实闭环的一部分（内容不丢）。"""
@@ -288,6 +269,8 @@ class ContentPipeline:
             "model": config["model"],
             "provider": config["provider"],
             "asrAvailable": asr_available(),
+            "asrMode": self._transcripts.asr_mode(),
+            "asrProviders": self._transcripts.providers_status(),
             "dbPath": str(self.store.path),
         }
 
