@@ -21,3 +21,9 @@ from .transcript import transcript_from_subtitle_file, transcribe_media, ASRUnav
 from .pipeline import ContentPipeline  # noqa: F401
 from .mock_data import seed_demo_items  # noqa: F401
 from .errors_feed import recent_errors  # noqa: F401
+
+# 任务编排内核（队列 / 重试 / 编排），与上面的服务层互不依赖，可单独使用
+from .jobs import Job, JobStore  # noqa: F401
+from .retry import RetryPolicy, RetryDecision, NonRetryableError, DEFAULT_POLICIES  # noqa: F401
+from .queue import JobQueue, WorkerPool, JobEvents  # noqa: F401
+from .orchestrator import PipelineOrchestrator, build_orchestrator  # noqa: F401
