@@ -20,8 +20,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "outputs/TikTokBatchMVP"))
 
 from content_factory.ai_enrichment import (  # noqa: E402
-    EnrichmentError, EnrichmentService, build_prompt, normalize_enrichment,
-    parse_enrichment,)
+    EnrichmentError, EnrichmentService, build_prompt, describe_http_error,
+    normalize_enrichment, parse_enrichment,)
 from content_factory.factory_store import FactoryStore  # noqa: E402
 from content_factory.pipeline import ContentPipeline  # noqa: E402
 from content_factory.settings_store import FactorySettings  # noqa: E402
@@ -50,14 +50,35 @@ GOOD_REPLY = json.dumps({
 
 
 class FakeResponse:
-    def __init__(self, text):
+    """模仿 requests.Response：状态码 >=400 时 raise_for_status() 必须抛异常。
+
+    这一点很关键 —— 如果假对象不抛，`_post` 里的错误翻译逻辑根本不会被触发，
+    测试会在"看起来通过了"的情况下漏掉真实行为（这个坑我踩过一次：
+    假异常直接抛在 post() 上，于是翻译层没跑，断言才失败）。
+    """
+
+    def __init__(self, text="", status=200, body=None):
         self._text = text
+        self.status_code = status
+        self._body = body
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            raise FakeHttpError(self.status_code, body=self._body)
         return None
 
     def json(self):
+        if self._body is not None:
+            return self._body
         return {"choices": [{"message": {"content": self._text}}]}
+
+
+class FakeHttpError(Exception):
+    """带 response 的 HTTP 异常，形态对齐 requests.HTTPError。"""
+
+    def __init__(self, status, url="https://api.deepseek.com/v1/chat/completions", body=None):
+        super().__init__(f"{status} Client Error for url: {url}")
+        self.response = FakeResponse(status=status, body=body)
 
 
 class FakeHttp:
@@ -72,6 +93,8 @@ class FakeHttp:
         reply = self.replies[min(len(self.calls) - 1, len(self.replies) - 1)] if self.replies else ""
         if isinstance(reply, Exception):
             raise reply
+        if isinstance(reply, FakeResponse):
+            return reply
         return FakeResponse(reply)
 
 
@@ -157,7 +180,6 @@ class EnrichmentServiceTests(TempEnvCase):
         with self.assertRaises(EnrichmentError) as ctx:
             service.enrich({"title": "x"}, "text")
         self.assertIn("API Key", str(ctx.exception))
-
     def test_retry_once_when_first_reply_is_not_json(self):
         http = FakeHttp(["抱歉，我先解释一下思路。", GOOD_REPLY])
         self.settings.update("ai", {"api_key": "sk-test", "model": "deepseek-chat"})
@@ -187,6 +209,80 @@ class EnrichmentServiceTests(TempEnvCase):
         http = FakeHttp([GOOD_REPLY])
         EnrichmentService(self.settings, http=http).enrich({"title": "x"}, "t")
         self.assertEqual(http.calls[0]["url"], "https://x.test/v1/chat/completions")
+
+
+class HttpErrorTranslationTests(unittest.TestCase):
+    """HTTP 报错必须翻译成用户能照着做的话（真机实测的三种原始报错见下）。
+
+    原始形态（真实 DeepSeek 接口，错误 Key / 错误模型 / 错误地址各试一次）：
+        400 Client Error: Bad Request for url: https://api.deepseek.com/v1/chat/completions
+        401 Client Error: Authorization Required for url: ...
+        404 Client Error: Not Found for url: ...
+    这些话直接显示在「AI 加工」页的失败原因里，用户看到"401 Client Error"是没法处理的。
+    """
+
+    def test_invalid_key_is_actionable(self):
+        message = describe_http_error(FakeHttpError(401))
+        self.assertIn("API Key 无效", message)
+        self.assertIn("AI 加工设置", message)
+
+    def test_wrong_api_base_points_at_the_address(self):
+        message = describe_http_error(FakeHttpError(404))
+        self.assertIn("接口地址", message)
+
+    def test_wrong_model_mentions_the_model_name(self):
+        message = describe_http_error(FakeHttpError(400))
+        self.assertIn("模型名", message)
+
+    def test_rate_limit_mentions_balance(self):
+        message = describe_http_error(FakeHttpError(429))
+        self.assertIn("额度", message)
+
+    def test_server_error_says_retry_later(self):
+        message = describe_http_error(FakeHttpError(503))
+        self.assertIn("稍后重试", message)
+
+    def test_server_side_detail_is_kept(self):
+        message = describe_http_error(FakeHttpError(
+            401, body={"error": {"message": "Authentication Fails, Your api key is invalid"}}))
+        self.assertIn("Authentication Fails", message, "服务端自己的说明不能丢")
+
+    def test_unknown_status_falls_back_to_http_code(self):
+        message = describe_http_error(FakeHttpError(418))
+        self.assertIn("418", message)
+
+    def test_no_status_keeps_the_original_text(self):
+        message = describe_http_error(ValueError("connection reset by peer"))
+        self.assertIn("connection reset by peer", message)
+
+    def test_missing_response_object_does_not_crash(self):
+        class Bare(Exception):
+            pass
+
+        message = describe_http_error(Bare("500 Server Error for url: https://x.test"))
+        self.assertIn("服务端错误", message, "没有 response 对象时也要按文本里的状态码识别")
+
+    def test_non_json_body_is_reported_clearly(self):
+        settings = FactorySettings(tempfile.mkdtemp())
+        settings.update("ai", {"api_key": "sk-test"})
+        broken = FakeResponse(status=200, body=None)
+        broken._body = None
+        broken.json = lambda: (_ for _ in ()).throw(ValueError("Expecting value: line 1"))
+        http = FakeHttp([broken])
+        with self.assertRaises(EnrichmentError) as ctx:
+            EnrichmentService(settings, http=http).enrich({"title": "x"}, "t")
+        self.assertIn("不是 JSON", str(ctx.exception))
+
+    def test_enrich_surfaces_the_translated_message_and_does_not_retry(self):
+        """HTTP 失败不该重试第二次 —— 否则用户为「Key 无效」白等两轮请求。"""
+        settings = FactorySettings(tempfile.mkdtemp())
+        settings.update("ai", {"api_key": "sk-bad"})
+        http = FakeHttp([FakeResponse(status=401), GOOD_REPLY])
+        service = EnrichmentService(settings, http=http)
+        with self.assertRaises(EnrichmentError) as ctx:
+            service.enrich({"title": "x"}, "some transcript")
+        self.assertIn("API Key 无效", str(ctx.exception))
+        self.assertEqual(len(http.calls), 1, "HTTP 报错只该发一次请求")
 
 
 class TranscriptTests(unittest.TestCase):
@@ -322,7 +418,7 @@ class PipelineTests(TempEnvCase):
         self.pipeline.ingest_videos([{"id": "v9", "title": "T",
                                       "url": "https://www.tiktok.com/@x/video/9"}])
         item_id = self.store.find_item_by_source("tiktok", "v9")["id"]
-        self.pipeline.set_transcript(item_id, "hello world this is a transcript")
+        self.pipeline.set_transcript(item_id, "hello world this is a transcript long enough to annotate")
         result = self.pipeline.enrich_one(item_id)
         self.assertFalse(result["ok"])
         self.assertTrue(result["needsApiKey"])
@@ -338,7 +434,8 @@ class PipelineTests(TempEnvCase):
         folder.mkdir()
         (folder / "clip.mp4").write_bytes(b"x")
         (folder / "clip.srt").write_text(
-            "1\n00:00:01,000 --> 00:00:02,000\nAI is changing how we think about work.\n",
+            "1\n00:00:01,000 --> 00:00:06,000\n"
+            "AI is changing how we think about work, and it is changing it fast.\n",
             encoding="utf-8")
         item_id = self.pipeline.create_from_local(folder)["ids"][0]
 
@@ -367,7 +464,9 @@ class PipelineTests(TempEnvCase):
             folder.mkdir()
             (folder / "clip.mp4").write_bytes(b"x")
             (folder / "clip.srt").write_text(
-                f"1\n00:00:01,000 --> 00:00:02,000\nline {index}\n", encoding="utf-8")
+                f"1\n00:00:01,000 --> 00:00:08,000\n"
+                f"this is demo line number {index} of a transcript that is long enough\n",
+                encoding="utf-8")
             ids.append(self.pipeline.create_from_local(folder)["ids"][0])
         results = self.pipeline.enrich_many(ids, background=False)
         self.assertEqual(results["queued"], 2)
@@ -377,7 +476,7 @@ class PipelineTests(TempEnvCase):
     def test_retry_after_fixing_the_key_succeeds(self):
         self.pipeline.ingest_videos([{"id": "v10", "title": "T"}])
         item_id = self.store.find_item_by_source("tiktok", "v10")["id"]
-        self.pipeline.set_transcript(item_id, "text for analysis")
+        self.pipeline.set_transcript(item_id, "text for analysis that is comfortably above the minimum")
         self.assertFalse(self.pipeline.enrich_one(item_id)["ok"])
         self.assertEqual(self.store.item(item_id)["ai_status"], "failed")
         self.settings.update("ai", {"api_key": "sk-test"})
@@ -399,6 +498,37 @@ class PipelineTests(TempEnvCase):
 
     def test_running_an_unknown_item_does_not_raise(self):
         self.assertFalse(self.pipeline.enrich_one("item_missing")["ok"])
+
+    def test_too_short_transcript_is_rejected_before_calling_the_model(self):
+        """实测过的坑：17 个字符的占位字幕也照样发给模型，模型"配合地"返回一份
+        看着像模像样、实际毫无价值的标注（连占位文字都被当成地道表达）。
+        这种结果比直接失败更糟 —— 它会被当成真结果用下去。"""
+        from content_factory.pipeline import MIN_TRANSCRIPT_CHARS
+        self.settings.update("ai", {"api_key": "sk-test"})
+        http = FakeHttp([GOOD_REPLY])
+        self.pipeline._enricher = EnrichmentService(self.settings, http=http)
+        self.pipeline.ingest_videos([{"id": "v-short", "title": "短字幕"}])
+        item_id = self.store.find_item_by_source("tiktok", "v-short")["id"]
+        self.pipeline.set_transcript(item_id, "(demo transcript)")
+
+        result = self.pipeline.enrich_one(item_id)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result.get("tooShort"))
+        self.assertIn("过短", result["error"])
+        self.assertIn(str(MIN_TRANSCRIPT_CHARS), result["error"])
+        self.assertEqual(len(http.calls), 0, "太短的输入不该浪费一次模型调用")
+        self.assertEqual(self.store.item(item_id)["ai_status"], "failed")
+
+    def test_transcript_at_the_threshold_is_accepted(self):
+        from content_factory.pipeline import MIN_TRANSCRIPT_CHARS
+        self.settings.update("ai", {"api_key": "sk-test"})
+        http = FakeHttp([GOOD_REPLY])
+        self.pipeline._enricher = EnrichmentService(self.settings, http=http)
+        self.pipeline.ingest_videos([{"id": "v-ok", "title": "刚好够长"}])
+        item_id = self.store.find_item_by_source("tiktok", "v-ok")["id"]
+        self.pipeline.set_transcript(item_id, "a" * MIN_TRANSCRIPT_CHARS)
+        self.assertTrue(self.pipeline.enrich_one(item_id)["ok"])
+        self.assertEqual(len(http.calls), 1)
 
 
 class DemoDataTests(TempEnvCase):

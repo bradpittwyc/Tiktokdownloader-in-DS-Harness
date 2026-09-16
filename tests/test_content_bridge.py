@@ -10,6 +10,7 @@
 """
 
 import inspect
+import json
 import os
 from pathlib import Path
 import sys
@@ -222,6 +223,39 @@ class BridgeBehaviourTests(unittest.TestCase):
         result = self.api.content_import_folder("Z:/definitely/not/here")
         self.assertFalse(result["ok"])
         self.assertIn("目录不存在", result["error"])
+
+    def test_import_legacy_ai_credentials(self):
+        """复用下载器学习文档里已配好的 Key，省得为 AI 标注再填一遍。"""
+        legacy = self.root / "TikTokBatchMVP" / "learning.json"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(json.dumps({
+            "api_key": "sk-legacy-key", "api_base": "https://api.deepseek.com/v1/",
+            "model": "deepseek-chat", "enabled": True,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        self.assertFalse(self.api.content_settings()["ai"]["apiKeySet"])
+        result = self.api.content_import_legacy_ai()
+        self.assertTrue(result["ok"], result)
+        view = self.api.content_settings()["ai"]
+        self.assertTrue(view["apiKeySet"], "导入后应显示已配置 Key")
+        self.assertEqual(view["api_key"], "", "导入后界面依然拿不到明文")
+        self.assertEqual(view["api_base"], "https://api.deepseek.com/v1", "末尾斜杠要去掉")
+        self.assertEqual(view["model"], "deepseek-chat")
+        # 真的落盘了：新建 settings 实例仍能读到
+        self.assertEqual(FactorySettings(self.root).section("ai")["api_key"], "sk-legacy-key")
+
+    def test_import_legacy_ai_without_file_is_reported(self):
+        result = self.api.content_import_legacy_ai()
+        self.assertFalse(result["ok"])
+        self.assertIn("learning.json", result["error"])
+
+    def test_import_legacy_ai_without_key_is_reported(self):
+        legacy = self.root / "TikTokBatchMVP" / "learning.json"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(json.dumps({"api_base": "https://x.test/v1"}), encoding="utf-8")
+        result = self.api.content_import_legacy_ai()
+        self.assertFalse(result["ok"])
+        self.assertIn("没有 API Key", result["error"])
 
 
 if __name__ == "__main__":

@@ -112,9 +112,12 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     title = "Tony Content Engine 截图"
-    window = webview.create_window(title, str(BASE / "ui" / "app.html"), js_api=api,
-                                   x=40, y=40, width=args.width, height=args.height,
-                                   background_color="#f5f7fb")
+    # 主文档 URL 也要带版本串：WebView2 按 URL 缓存 file:// 主文档，
+    # 不带的话改完 app.css 重新截图还是旧样式（实测踩过，见 web_app.start_ui 注释）。
+    stamp = str(int(time.time()))
+    window = webview.create_window(title, str(BASE / "ui" / "app.html") + f"?v={stamp}",
+                                   js_api=api, x=40, y=40, width=args.width,
+                                   height=args.height, background_color="#f5f7fb")
 
     def settled():
         for _ in range(160):

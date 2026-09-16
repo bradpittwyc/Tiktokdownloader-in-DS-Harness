@@ -174,6 +174,17 @@ class ContentFactoryApi:
     def content_settings(self):
         return self._settings.public()
 
+    def content_prompts(self):
+        """给「AI 加工设置」用的 Prompt 版本清单。
+
+        返回每个版本的名称、说明与模板文本，以及当前生效的版本。
+        UI 靠它渲染下拉框 —— 加新版本时不需要改前端代码。
+        """
+        from content_factory.prompts import all_prompts, resolve_prompt
+
+        current, _template = resolve_prompt(self._settings.section("ai").get("prompt_template"))
+        return {"ok": True, "current": current, "prompts": all_prompts()}
+
     def content_save_settings(self, section, values):
         section = str(section or "").strip()
         if section not in ("general", "work_mode", "logging", "collect", "ai", "publish",
@@ -182,6 +193,49 @@ class ContentFactoryApi:
         saved = self._settings.update(section, values or {})
         return {"ok": True, "section": section,
                 "settings": self._settings.public(), "saved": bool(saved)}
+
+    def content_set_prompt_version(self, version):
+        """切换 Prompt 版本。
+
+        - 传已知版本名 → 存版本名（模板由版本库统一提供，永不覆盖旧版）
+        - 传 `custom` 且带 template → 存用户自己写的文本
+        - 传 `reset` → 回到默认版本
+        """
+        from content_factory.prompts import ACTIVE_VERSION, get_prompt, resolve_prompt
+
+        version = str(version or "").strip()
+        if version == "reset":
+            version = ACTIVE_VERSION
+        spec = get_prompt(version)
+        if spec:
+            self._settings.update("ai", {"prompt_template": spec.version})
+        elif version == "custom":
+            return {"ok": False, "error": "切到自定义版本需要同时提供模板文本"}
+        else:
+            return {"ok": False, "error": f"未知的 Prompt 版本：{version}"}
+        current, template = resolve_prompt(self._settings.section("ai").get("prompt_template"))
+        return {"ok": True, "current": current, "template": template,
+                "settings": self._settings.public()}
+
+    def content_save_prompt_template(self, template):
+        """保存用户编辑过的模板文本。
+
+        文本与某个已知版本**完全一致**时存版本名（这样历史标注仍能正确归因），
+        否则存为自定义模板。
+        """
+        from content_factory.prompts import CUSTOM_VERSION, PROMPT_LIBRARY, resolve_prompt
+
+        text = str(template or "").strip()
+        if not text:
+            return {"ok": False, "error": "模板不能为空"}
+        if "{transcript}" not in text:
+            return {"ok": False, "error": "模板里必须保留 {transcript} 占位符，否则模型看不到字幕"}
+        matched = next((spec.version for spec in PROMPT_LIBRARY.values()
+                        if spec.template.strip() == text), None)
+        self._settings.update("ai", {"prompt_template": matched or text})
+        current, resolved = resolve_prompt(self._settings.section("ai").get("prompt_template"))
+        return {"ok": True, "current": current, "matched_version": matched,
+                "template": resolved, "settings": self._settings.public()}
 
     def content_reset_settings(self, section=""):
         """把某个分区恢复到出厂默认值（只覆盖该分区的键，不动别的分区）。"""
@@ -201,6 +255,37 @@ class ContentFactoryApi:
             if str(staged.get("api_key") or "").strip():
                 self._settings.update("ai", staged)
         return self._pipeline._enricher.test_connection()
+
+    def content_import_legacy_ai(self):
+        """把下载器「学习文档」里已配好的 API 凭据导入内容工厂。
+
+        很多用户（包括本机）早就在 learning.json 里配过 DeepSeek，没必要为了
+        AI 标注再手填一遍 Key。只导入 api_key / api_base / model 三项，
+        其余参数保持内容工厂自己的默认值；导入后仍可在设置页覆盖。
+        """
+        import json as _json
+        import os as _os
+        from pathlib import Path as _Path
+
+        path = (_Path(_os.environ.get("LOCALAPPDATA", str(_Path.home())))
+                / "TikTokBatchMVP" / "learning.json")
+        if not path.is_file():
+            return {"ok": False, "error": "没有找到已有的学习文档配置（learning.json）"}
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {"ok": False, "error": f"读取 learning.json 失败：{exc}"}
+        key = str(data.get("api_key") or "").strip()
+        if not key:
+            return {"ok": False, "error": "已有的学习文档配置里没有 API Key"}
+        values = {"api_key": key}
+        if str(data.get("api_base") or "").strip():
+            values["api_base"] = str(data["api_base"]).strip().rstrip("/")
+        if str(data.get("model") or "").strip():
+            values["model"] = str(data["model"]).strip()
+        self._settings.update("ai", values)
+        return {"ok": True, "api_base": values.get("api_base", ""),
+                "model": values.get("model", ""), "settings": self._settings.public()}
 
     def content_choose_folder(self, kind="video"):
         """复用下载器的目录选择对话框。"""

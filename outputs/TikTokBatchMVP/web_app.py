@@ -2198,10 +2198,16 @@ def start_ui(api):
     从 v2.0 起首页是内容工厂外壳（ui/app.html），原下载器界面完整保留在
     ui/index.html 里，由外壳的「视频库」页内嵌显示 —— 现有 7 个 UI 测试
     仍然直接加载 index.html，所以那套断言一行都不用改。
+
+    URL 上的 `?v=<版本号>` 是必须的，不是装饰：WebView2 会按 URL 缓存 file:// 的
+    主文档，改完 app.css / app.js 重新启动后界面还是旧的（实测：真窗口里
+    `document.styleSheets` 能读到 app.css，但页面实际生效的规则里根本没有新加的
+    .g-queue，因为缓存住的旧 app.html 还指向旧的 app.css?v=3）。
+    app.html 内部再给 css/js 带自己的 ?v=，两层一起换 URL，才能保证改完就生效。
     """
     api._window = webview.create_window(
         WINDOW_TITLE,
-        str(BASE / "ui" / "app.html"),
+        str(BASE / "ui" / "app.html") + f"?v={app_version()}",
         js_api=api,
         width=1360,
         height=900,

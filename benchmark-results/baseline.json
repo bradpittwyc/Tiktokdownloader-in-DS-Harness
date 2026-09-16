@@ -1,0 +1,1905 @@
+{
+  "version": "ai-enrichment-v1",
+  "model": "deepseek-chat",
+  "records": [
+    {
+      "id": "ai-tech-interview-01",
+      "title": "ML engineer explains how models actually get deployed",
+      "category": "访谈",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "AI 科技",
+        "subtopic": "机器学习模型部署与生产环境",
+        "cefr_level": "B2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "training",
+          "production",
+          "latency budgets",
+          "feature pipelines",
+          "data",
+          "modelling",
+          "plumbing",
+          "deployed",
+          "fall apart",
+          "to be fair"
+        ],
+        "expressions": [
+          {
+            "text": "fall apart",
+            "meaning_zh": "崩溃；瓦解；出问题",
+            "example": "The plan fell apart when we lost funding."
+          },
+          {
+            "text": "latency budgets",
+            "meaning_zh": "延迟预算（系统允许的最大响应时间）",
+            "example": "We need to stay within our latency budgets."
+          },
+          {
+            "text": "feature pipelines",
+            "meaning_zh": "特征管道（数据处理流程）",
+            "example": "Building feature pipelines is often more work than training."
+          },
+          {
+            "text": "to be fair",
+            "meaning_zh": "平心而论；说句公道话",
+            "example": "To be fair, she did warn us about the risks."
+          },
+          {
+            "text": "the plumbing around it",
+            "meaning_zh": "围绕它的基础设施/支撑工作",
+            "example": "The plumbing around the model is what takes time."
+          }
+        ],
+        "grammar_points": [
+          "现在完成时（You've got）",
+          "定语从句（the data you trained on）",
+          "表语从句（that's where things fall apart）",
+          "比较结构（doesn't even look like）"
+        ],
+        "key_sentences": [
+          {
+            "text": "Training a model is honestly the easy part.",
+            "translation_zh": "老实说，训练模型是最简单的部分。"
+          },
+          {
+            "text": "Getting it into production, that's where things fall apart.",
+            "translation_zh": "把它投入生产，那才是事情崩溃的地方。"
+          },
+          {
+            "text": "You've got latency budgets, you've got this whole mess of feature pipelines.",
+            "translation_zh": "你有延迟预算，你还有一堆乱七八糟的特征管道。"
+          },
+          {
+            "text": "Half the time the data you trained on doesn't even look like the data you get in production.",
+            "translation_zh": "很多时候，你训练用的数据甚至和生产环境中的数据不一样。"
+          },
+          {
+            "text": "Most of the work isn't the modelling at all. It's the plumbing around it.",
+            "translation_zh": "大部分工作根本不是建模，而是围绕它的基础设施。"
+          }
+        ],
+        "summary_zh": "一位机器学习工程师解释模型部署到生产环境的困难，指出训练只是简单部分，真正的挑战在于延迟预算、特征管道以及数据不一致等工程问题。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.53,
+      "raw_response": "{\n  \"topic\": \"AI 科技\",\n  \"subtopic\": \"机器学习模型部署与生产环境\",\n  \"cefr_level\": \"B2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\n    \"training\",\n    \"production\",\n    \"latency budgets\",\n    \"feature pipelines\",\n    \"data\",\n    \"modelling\",\n    \"plumbing\",\n    \"deployed\",\n    \"fall apart\",\n    \"to be fair\"\n  ],\n  \"expressions\": [\n    {\n      \"text\": \"fall apart\",\n      \"meaning_zh\": \"崩溃；瓦解；出问题\",\n      \"example\": \"The plan fell apart when we lost funding.\"\n    },\n    {\n      \"text\": \"latency budgets\",\n      \"meaning_zh\": \"延迟预算（系统允许的最大响应时间）\",\n      \"example\": \"We need to stay within our latency budgets.\"\n    },\n    {\n      \"text\": \"feature pipelines\",\n      \"meaning_zh\": \"特征管道（数据处理流程）\",\n      \"example\": \"Building feature pipelines is often more work than training.\"\n    },\n    {\n      \"text\": \"to be fair\",\n      \"meaning_zh\": \"平心而论；说句公道话\",\n      \"example\": \"To be fair, she did warn us about the risks.\"\n    },\n    {\n      \"text\": \"the plumbing around it\",\n      \"meaning_zh\": \"围绕它的基础设施/支撑工作\",\n      \"example\": \"The plumbing around the model is what takes time.\"\n    }\n  ],\n  \"grammar_points\": [\n    \"现在完成时（You've got）\",\n    \"定语从句（the data you trained on）\",\n    \"表语从句（that's where things fall apart）\",\n    \"比较结构（doesn't even look like）\"\n  ],\n  \"key_sentences\": [\n    {\n      \"text\": \"Training a model is honestly the easy part.\",\n      \"translation_zh\": \"老实说，训练模型是最简单的部分。\"\n    },\n    {\n      \"text\": \"Getting it into production, that's where things fall apart.\",\n      \"translation_zh\": \"把它投入生产，那才是事情崩溃的地方。\"\n    },\n    {\n      \"text\": \"You've got latency budgets, you've got this whole mess of feature pipelines.\",\n      \"translation_zh\": \"你有延迟预算，你还有一堆乱七八糟的特征管道。\"\n    },\n    {\n      \"text\": \"Half the time the data you trained on doesn't even look like the data you get in production.\",\n      \"translation_zh\": \"很多时候，你训练用的数据甚至和生产环境中的数据不一样。\"\n    },\n    {\n      \"text\": \"Most of the work isn't the modelling at all. It's the plumbing around it.\",\n      \"translation_zh\": \"大部分工作根本不是建模，而是围绕它的基础设施。\"\n    }\n  ],\n  \"summary_zh\": \"一位机器学习工程师解释模型部署到生产环境的困难，指出训练只是简单部分，真正的挑战在于延迟预算、特征管道以及数据不一致等工程问题。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.8,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.9339
+      }
+    },
+    {
+      "id": "ai-tech-opinion-02",
+      "title": "The real reason AI will change everything",
+      "category": "AI / 科技",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "AI 科技",
+        "subtopic": "AI 对工作与经济的影响",
+        "cefr_level": "B2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "AI",
+          "jobs",
+          "cost of thinking",
+          "collapsing",
+          "supercomputer",
+          "replacement",
+          "tool",
+          "small team",
+          "shift",
+          "predicted"
+        ],
+        "expressions": [
+          {
+            "text": "take our jobs",
+            "meaning_zh": "抢走我们的工作",
+            "example": "Many people worry that automation will take our jobs."
+          },
+          {
+            "text": "the cost of thinking is collapsing",
+            "meaning_zh": "思考的成本正在崩塌/急剧下降",
+            "example": "With AI, the cost of thinking is collapsing, enabling new possibilities."
+          },
+          {
+            "text": "do the work of a small team",
+            "meaning_zh": "完成一个小团队的工作量",
+            "example": "This software lets one person do the work of a small team."
+          },
+          {
+            "text": "the wrong question",
+            "meaning_zh": "错误的问题",
+            "example": "Asking whether AI will replace us is the wrong question."
+          },
+          {
+            "text": "entirely new things",
+            "meaning_zh": "全新的事物",
+            "example": "When technology becomes cheaper, we start doing entirely new things."
+          }
+        ],
+        "grammar_points": [
+          "现在进行时表将来（is going to take）",
+          "when 引导的时间状语从句",
+          "定语从句（that lets one person...）",
+          "比较级（cheaper）与倍数表达（a thousand times cheaper）"
+        ],
+        "key_sentences": [
+          {
+            "text": "The real shift is that the cost of thinking is collapsing.",
+            "translation_zh": "真正的转变是思考的成本正在崩塌。"
+          },
+          {
+            "text": "When something becomes a thousand times cheaper, you do not just do the same thing more cheaply, you do entirely new things.",
+            "translation_zh": "当某样东西变得便宜一千倍时，你不仅仅是更便宜地做同样的事，而是会做全新的事。"
+          },
+          {
+            "text": "Nobody in 1970 predicted that we would carry a supercomputer in our pocket and use it mostly to look at pictures of cats.",
+            "translation_zh": "1970年没有人预测到我们会把超级计算机装在口袋里，而且主要用它来看猫的图片。"
+          },
+          {
+            "text": "I see a tool that lets one person do the work of a small team.",
+            "translation_zh": "我看到的是一个能让一个人完成一个小团队工作的工具。"
+          }
+        ],
+        "summary_zh": "这段视频讨论了AI对工作的真正影响：不是取代人类，而是让思考的成本急剧下降，从而开启全新的可能性。演讲者认为AI是一个能让个人拥有小团队生产力的工具。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.33,
+      "raw_response": "{\n  \"topic\": \"AI 科技\",\n  \"subtopic\": \"AI 对工作与经济的影响\",\n  \"cefr_level\": \"B2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\n    \"AI\",\n    \"jobs\",\n    \"cost of thinking\",\n    \"collapsing\",\n    \"supercomputer\",\n    \"replacement\",\n    \"tool\",\n    \"small team\",\n    \"shift\",\n    \"predicted\"\n  ],\n  \"expressions\": [\n    {\n      \"text\": \"take our jobs\",\n      \"meaning_zh\": \"抢走我们的工作\",\n      \"example\": \"Many people worry that automation will take our jobs.\"\n    },\n    {\n      \"text\": \"the cost of thinking is collapsing\",\n      \"meaning_zh\": \"思考的成本正在崩塌/急剧下降\",\n      \"example\": \"With AI, the cost of thinking is collapsing, enabling new possibilities.\"\n    },\n    {\n      \"text\": \"do the work of a small team\",\n      \"meaning_zh\": \"完成一个小团队的工作量\",\n      \"example\": \"This software lets one person do the work of a small team.\"\n    },\n    {\n      \"text\": \"the wrong question\",\n      \"meaning_zh\": \"错误的问题\",\n      \"example\": \"Asking whether AI will replace us is the wrong question.\"\n    },\n    {\n      \"text\": \"entirely new things\",\n      \"meaning_zh\": \"全新的事物\",\n      \"example\": \"When technology becomes cheaper, we start doing entirely new things.\"\n    }\n  ],\n  \"grammar_points\": [\n    \"现在进行时表将来（is going to take）\",\n    \"when 引导的时间状语从句\",\n    \"定语从句（that lets one person...）\",\n    \"比较级（cheaper）与倍数表达（a thousand times cheaper）\"\n  ],\n  \"key_sentences\": [\n    {\n      \"text\": \"The real shift is that the cost of thinking is collapsing.\",\n      \"translation_zh\": \"真正的转变是思考的成本正在崩塌。\"\n    },\n    {\n      \"text\": \"When something becomes a thousand times cheaper, you do not just do the same thing more cheaply, you do entirely new things.\",\n      \"translation_zh\": \"当某样东西变得便宜一千倍时，你不仅仅是更便宜地做同样的事，而是会做全新的事。\"\n    },\n    {\n      \"text\": \"Nobody in 1970 predicted that we would carry a supercomputer in our pocket and use it mostly to look at pictures of cats.\",\n      \"translation_zh\": \"1970年没有人预测到我们会把超级计算机装在口袋里，而且主要用它来看猫的图片。\"\n    },\n    {\n      \"text\": \"I see a tool that lets one person do the work of a small team.\",\n      \"translation_zh\": \"我看到的是一个能让一个人完成一个小团队工作的工具。\"\n    }\n  ],\n  \"summary_zh\": \"这段视频讨论了AI对工作的真正影响：不是取代人类，而是让思考的成本急剧下降，从而开启全新的可能性。演讲者认为AI是一个能让个人拥有小团队生产力的工具。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.42,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.8796
+      }
+    },
+    {
+      "id": "business-freelance-03",
+      "title": "Nobody tells you this about freelancing",
+      "category": "商业",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "职场成长",
+        "subtopic": "自由职业与个人财务",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.82,
+        "keywords": [
+          "freelancing",
+          "sales",
+          "client",
+          "income",
+          "lumpy",
+          "expenses",
+          "cash",
+          "out of business",
+          "rule",
+          "designer"
+        ],
+        "expressions": [
+          {
+            "text": "out of business",
+            "meaning_zh": "停业；倒闭",
+            "example": "If you cannot find the next client, you are out of business."
+          },
+          {
+            "text": "lumpy",
+            "meaning_zh": "不稳定的；起伏不定的",
+            "example": "Your income becomes lumpy when you freelance."
+          },
+          {
+            "text": "live on last month's money",
+            "meaning_zh": "靠上个月的钱生活",
+            "example": "The rule I follow is simple: live on last month's money."
+          },
+          {
+            "text": "keep six months of expenses in cash",
+            "meaning_zh": "留出六个月的开支现金",
+            "example": "Keep six months of expenses in cash for safety."
+          },
+          {
+            "text": "the rule I follow",
+            "meaning_zh": "我遵循的规则",
+            "example": "The rule I follow is simple and practical."
+          }
+        ],
+        "grammar_points": [
+          "一般现在时",
+          "条件状语从句",
+          "情态动词 might",
+          "祈使句"
+        ],
+        "key_sentences": [
+          {
+            "text": "Nobody tells you that freelancing is mostly sales.",
+            "translation_zh": "没人告诉你，自由职业主要是做销售。"
+          },
+          {
+            "text": "You can be the best designer in the world, but if you cannot find the next client, you are out of business.",
+            "translation_zh": "你可能是世界上最好的设计师，但如果找不到下一个客户，你就会倒闭。"
+          },
+          {
+            "text": "The second thing nobody tells you is that your income becomes lumpy.",
+            "translation_zh": "没人告诉你的第二件事是，你的收入会变得不稳定。"
+          },
+          {
+            "text": "You might make ten thousand dollars in March and nothing in April.",
+            "translation_zh": "你可能三月赚一万美元，四月却一分没有。"
+          },
+          {
+            "text": "Live on last month's money and keep six months of expenses in cash.",
+            "translation_zh": "靠上个月的钱生活，并留出六个月的开支现金。"
+          }
+        ],
+        "summary_zh": "这段视频揭示了自由职业不为人知的真相：自由职业本质上主要是销售，收入不稳定，因此需要靠上个月的钱生活并预留六个月现金。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 2.78,
+      "raw_response": "{\n  \"topic\": \"职场成长\",\n  \"subtopic\": \"自由职业与个人财务\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.82,\n  \"keywords\": [\"freelancing\", \"sales\", \"client\", \"income\", \"lumpy\", \"expenses\", \"cash\", \"out of business\", \"rule\", \"designer\"],\n  \"expressions\": [\n    {\"text\": \"out of business\", \"meaning_zh\": \"停业；倒闭\", \"example\": \"If you cannot find the next client, you are out of business.\"},\n    {\"text\": \"lumpy\", \"meaning_zh\": \"不稳定的；起伏不定的\", \"example\": \"Your income becomes lumpy when you freelance.\"},\n    {\"text\": \"live on last month's money\", \"meaning_zh\": \"靠上个月的钱生活\", \"example\": \"The rule I follow is simple: live on last month's money.\"},\n    {\"text\": \"keep six months of expenses in cash\", \"meaning_zh\": \"留出六个月的开支现金\", \"example\": \"Keep six months of expenses in cash for safety.\"},\n    {\"text\": \"the rule I follow\", \"meaning_zh\": \"我遵循的规则\", \"example\": \"The rule I follow is simple and practical.\"}\n  ],\n  \"grammar_points\": [\"一般现在时\", \"条件状语从句\", \"情态动词 might\", \"祈使句\"],\n  \"key_sentences\": [\n    {\"text\": \"Nobody tells you that freelancing is mostly sales.\", \"translation_zh\": \"没人告诉你，自由职业主要是做销售。\"},\n    {\"text\": \"You can be the best designer in the world, but if you cannot find the next client, you are out of business.\", \"translation_zh\": \"你可能是世界上最好的设计师，但如果找不到下一个客户，你就会倒闭。\"},\n    {\"text\": \"The second thing nobody tells you is that your income becomes lumpy.\", \"translation_zh\": \"没人告诉你的第二件事是，你的收入会变得不稳定。\"},\n    {\"text\": \"You might make ten thousand dollars in March and nothing in April.\", \"translation_zh\": \"你可能三月赚一万美元，四月却一分没有。\"},\n    {\"text\": \"Live on last month's money and keep six months of expenses in cash.\", \"translation_zh\": \"靠上个月的钱生活，并留出六个月的开支现金。\"}\n  ],\n  \"summary_zh\": \"这段视频揭示了自由职业不为人知的真相：自由职业本质上主要是销售，收入不稳定，因此需要靠上个月的钱生活并预留六个月现金。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 0.5,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.68,
+        "grammar_quality": 0.55,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.8186
+      }
+    },
+    {
+      "id": "career-habits-04",
+      "title": "3 habits that changed my life as a software engineer",
+      "category": "职场",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "职场成长",
+        "subtopic": "软件工程师的高效工作习惯",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "productivity",
+          "protecting your focus",
+          "shutdown ritual",
+          "anxiety",
+          "batching shallow work",
+          "deep work block",
+          "schedule",
+          "laptop",
+          "reviews",
+          "team"
+        ],
+        "expressions": [
+          {
+            "text": "learned the hard way",
+            "meaning_zh": "通过痛苦的经历才明白",
+            "example": "I learned the hard way that you can't please everyone."
+          },
+          {
+            "text": "protecting your focus",
+            "meaning_zh": "保护你的专注力",
+            "example": "Protecting your focus is more important than checking emails."
+          },
+          {
+            "text": "shutdown ritual",
+            "meaning_zh": "关机仪式（结束工作前的固定流程）",
+            "example": "My shutdown ritual helps me disconnect from work."
+          },
+          {
+            "text": "cut my anxiety in half",
+            "meaning_zh": "把我的焦虑减少了一半",
+            "example": "Meditation cut my anxiety in half."
+          },
+          {
+            "text": "batching shallow work",
+            "meaning_zh": "批量处理浅层工作",
+            "example": "Batching shallow work saves me a lot of time."
+          },
+          {
+            "text": "deep work block",
+            "meaning_zh": "深度工作时段",
+            "example": "I schedule a two-hour deep work block every morning."
+          }
+        ],
+        "grammar_points": [
+          "一般过去时（used to think, learned, cut）",
+          "名词性从句（what I call a shutdown ritual）",
+          "定语从句（the three things that matter for tomorrow）",
+          "比较级（hardest one to keep）"
+        ],
+        "key_sentences": [
+          {
+            "text": "I used to think productivity was about doing more, but I learned the hard way that it's actually about protecting your focus.",
+            "translation_zh": "我过去认为效率就是做更多的事，但我通过痛苦的经历才明白，效率实际上是关于保护你的专注力。"
+          },
+          {
+            "text": "Every evening I write down the three things that matter for tomorrow, and then I close my laptop.",
+            "translation_zh": "每天晚上我会写下第二天重要的三件事，然后合上笔记本电脑。"
+          },
+          {
+            "text": "That single habit cut my anxiety in half.",
+            "translation_zh": "仅仅这一个习惯就把我的焦虑减少了一半。"
+          },
+          {
+            "text": "The second one is batching shallow work.",
+            "translation_zh": "第二个习惯是批量处理浅层工作。"
+          },
+          {
+            "text": "I schedule a two-hour deep work block before anyone else on my team is awake.",
+            "translation_zh": "我会在团队里其他人醒来之前安排一个两小时的深度工作时段。"
+          }
+        ],
+        "summary_zh": "作者分享作为软件工程师改变她生活的三个日常习惯：关机仪式、批量处理浅层工作、以及早起进行两小时深度工作。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.44,
+      "raw_response": "{\n  \"topic\": \"职场成长\",\n  \"subtopic\": \"软件工程师的高效工作习惯\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\n    \"productivity\",\n    \"protecting your focus\",\n    \"shutdown ritual\",\n    \"anxiety\",\n    \"batching shallow work\",\n    \"deep work block\",\n    \"schedule\",\n    \"laptop\",\n    \"reviews\",\n    \"team\"\n  ],\n  \"expressions\": [\n    {\n      \"text\": \"learned the hard way\",\n      \"meaning_zh\": \"通过痛苦的经历才明白\",\n      \"example\": \"I learned the hard way that you can't please everyone.\"\n    },\n    {\n      \"text\": \"protecting your focus\",\n      \"meaning_zh\": \"保护你的专注力\",\n      \"example\": \"Protecting your focus is more important than checking emails.\"\n    },\n    {\n      \"text\": \"shutdown ritual\",\n      \"meaning_zh\": \"关机仪式（结束工作前的固定流程）\",\n      \"example\": \"My shutdown ritual helps me disconnect from work.\"\n    },\n    {\n      \"text\": \"cut my anxiety in half\",\n      \"meaning_zh\": \"把我的焦虑减少了一半\",\n      \"example\": \"Meditation cut my anxiety in half.\"\n    },\n    {\n      \"text\": \"batching shallow work\",\n      \"meaning_zh\": \"批量处理浅层工作\",\n      \"example\": \"Batching shallow work saves me a lot of time.\"\n    },\n    {\n      \"text\": \"deep work block\",\n      \"meaning_zh\": \"深度工作时段\",\n      \"example\": \"I schedule a two-hour deep work block every morning.\"\n    }\n  ],\n  \"grammar_points\": [\n    \"一般过去时（used to think, learned, cut）\",\n    \"名词性从句（what I call a shutdown ritual）\",\n    \"定语从句（the three things that matter for tomorrow）\",\n    \"比较级（hardest one to keep）\"\n  ],\n  \"key_sentences\": [\n    {\n      \"text\": \"I used to think productivity was about doing more, but I learned the hard way that it's actually about protecting your focus.\",\n      \"translation_zh\": \"我过去认为效率就是做更多的事，但我通过痛苦的经历才明白，效率实际上是关于保护你的专注力。\"\n    },\n    {\n      \"text\": \"Every evening I write down the three things that matter for tomorrow, and then I close my laptop.\",\n      \"translation_zh\": \"每天晚上我会写下第二天重要的三件事，然后合上笔记本电脑。\"\n    },\n    {\n      \"text\": \"That single habit cut my anxiety in half.\",\n      \"translation_zh\": \"仅仅这一个习惯就把我的焦虑减少了一半。\"\n    },\n    {\n      \"text\": \"The second one is batching shallow work.\",\n      \"translation_zh\": \"第二个习惯是批量处理浅层工作。\"\n    },\n    {\n      \"text\": \"I schedule a two-hour deep work block before anyone else on my team is awake.\",\n      \"translation_zh\": \"我会在团队里其他人醒来之前安排一个两小时的深度工作时段。\"\n    }\n  ],\n  \"summary_zh\": \"作者分享作为软件工程师改变她生活的三个日常习惯：关机仪式、批量处理浅层工作、以及早起进行两小时深度工作。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 1.0,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.9625
+      }
+    },
+    {
+      "id": "business-copywriting-05",
+      "title": "How to write copy that actually converts",
+      "category": "商业",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "职场成长",
+        "subtopic": "文案写作与营销转化",
+        "cefr_level": "B2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "copywriting",
+          "converts",
+          "headline",
+          "pain",
+          "scroll",
+          "buzzwords",
+          "solution",
+          "product",
+          "paragraph",
+          "synergy-driven"
+        ],
+        "expressions": [
+          {
+            "text": "Here's the thing",
+            "meaning_zh": "问题是；关键在于",
+            "example": "Here's the thing about copywriting."
+          },
+          {
+            "text": "scroll straight past",
+            "meaning_zh": "直接滑过去，快速略过",
+            "example": "They will scroll straight past it."
+          },
+          {
+            "text": "lead with",
+            "meaning_zh": "以……开头；把……放在首位",
+            "example": "So lead with the problem."
+          },
+          {
+            "text": "cut the buzzwords",
+            "meaning_zh": "删掉那些流行术语/空话",
+            "example": "And please, cut the buzzwords."
+          },
+          {
+            "text": "synergy-driven",
+            "meaning_zh": "协同效应驱动的（常指空泛的商务套话）",
+            "example": "Nobody has ever bought anything because a paragraph was synergy-driven."
+          }
+        ],
+        "grammar_points": [
+          "一般现在时",
+          "if 条件句",
+          "祈使句",
+          "现在完成时"
+        ],
+        "key_sentences": [
+          {
+            "text": "Most people write about the product, but they should be writing about the problem.",
+            "translation_zh": "大多数人写的是产品，但他们应该写的是问题。"
+          },
+          {
+            "text": "If your headline doesn't name the pain your reader already feels, they will scroll straight past it.",
+            "translation_zh": "如果你的标题没有点出读者已经感受到的痛点，他们就会直接滑过去。"
+          },
+          {
+            "text": "So lead with the problem, then show the solution.",
+            "translation_zh": "所以要先从问题入手，然后再展示解决方案。"
+          },
+          {
+            "text": "Nobody has ever bought anything because a paragraph was synergy-driven.",
+            "translation_zh": "从来没有人会因为一段文字充满协同效应之类的空话而买东西。"
+          }
+        ],
+        "summary_zh": "这段短视频讲解了文案写作的核心原则：要写问题而非产品，标题要直击读者痛点，先问题后方案，并避免使用空洞的流行术语。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 2.84,
+      "raw_response": "{\n  \"topic\": \"职场成长\",\n  \"subtopic\": \"文案写作与营销转化\",\n  \"cefr_level\": \"B2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\"copywriting\", \"converts\", \"headline\", \"pain\", \"scroll\", \"buzzwords\", \"solution\", \"product\", \"paragraph\", \"synergy-driven\"],\n  \"expressions\": [\n    {\"text\": \"Here's the thing\", \"meaning_zh\": \"问题是；关键在于\", \"example\": \"Here's the thing about copywriting.\"},\n    {\"text\": \"scroll straight past\", \"meaning_zh\": \"直接滑过去，快速略过\", \"example\": \"They will scroll straight past it.\"},\n    {\"text\": \"lead with\", \"meaning_zh\": \"以……开头；把……放在首位\", \"example\": \"So lead with the problem.\"},\n    {\"text\": \"cut the buzzwords\", \"meaning_zh\": \"删掉那些流行术语/空话\", \"example\": \"And please, cut the buzzwords.\"},\n    {\"text\": \"synergy-driven\", \"meaning_zh\": \"协同效应驱动的（常指空泛的商务套话）\", \"example\": \"Nobody has ever bought anything because a paragraph was synergy-driven.\"}\n  ],\n  \"grammar_points\": [\"一般现在时\", \"if 条件句\", \"祈使句\", \"现在完成时\"],\n  \"key_sentences\": [\n    {\"text\": \"Most people write about the product, but they should be writing about the problem.\", \"translation_zh\": \"大多数人写的是产品，但他们应该写的是问题。\"},\n    {\"text\": \"If your headline doesn't name the pain your reader already feels, they will scroll straight past it.\", \"translation_zh\": \"如果你的标题没有点出读者已经感受到的痛点，他们就会直接滑过去。\"},\n    {\"text\": \"So lead with the problem, then show the solution.\", \"translation_zh\": \"所以要先从问题入手，然后再展示解决方案。\"},\n    {\"text\": \"Nobody has ever bought anything because a paragraph was synergy-driven.\", \"translation_zh\": \"从来没有人会因为一段文字充满协同效应之类的空话而买东西。\"}\n  ],\n  \"summary_zh\": \"这段短视频讲解了文案写作的核心原则：要写问题而非产品，标题要直击读者痛点，先问题后方案，并避免使用空洞的流行术语。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 0.5,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.6,
+        "grammar_quality": 0.3625,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.7804
+      }
+    },
+    {
+      "id": "business-startup-06",
+      "title": "Why most startups fail in year two",
+      "category": "商业",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "职场成长",
+        "subtopic": "创业失败教训",
+        "cefr_level": "B2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "seed round",
+          "runway",
+          "the writing was on the wall",
+          "chasing a market",
+          "enthusiasm",
+          "demand",
+          "brutally honest",
+          "startup",
+          "customers",
+          "code"
+        ],
+        "expressions": [
+          {
+            "text": "seed round",
+            "meaning_zh": "种子轮融资",
+            "example": "They raised a $2M seed round."
+          },
+          {
+            "text": "runway",
+            "meaning_zh": "资金可维持的时间",
+            "example": "We need to extend our runway by cutting costs."
+          },
+          {
+            "text": "the writing was on the wall",
+            "meaning_zh": "不祥之兆已现",
+            "example": "The writing was on the wall for the company's failure."
+          },
+          {
+            "text": "chasing a market",
+            "meaning_zh": "追逐市场",
+            "example": "They were chasing a market that didn't exist."
+          },
+          {
+            "text": "mistook A for B",
+            "meaning_zh": "把A误认为B",
+            "example": "I mistook her silence for agreement."
+          },
+          {
+            "text": "be brutally honest",
+            "meaning_zh": "极其坦诚",
+            "example": "Be brutally honest about your weaknesses."
+          }
+        ],
+        "grammar_points": [
+          "过去时",
+          "过去完成时",
+          "动名词作主语",
+          "祈使句"
+        ],
+        "key_sentences": [
+          {
+            "text": "We raised a seed round, hired too fast, and then watched the runway shrink month after month.",
+            "translation_zh": "我们融了种子轮，招人太快，然后看着资金一个月一个月地减少。"
+          },
+          {
+            "text": "Looking back, the writing was on the wall long before we admitted it.",
+            "translation_zh": "回头看，早在我們承认之前，不祥之兆就已经很明显了。"
+          },
+          {
+            "text": "We were chasing a market that didn't exist yet, and we mistook early enthusiasm for real demand.",
+            "translation_zh": "我们在追逐一个尚不存在的市场，把早期的热情误当成了真实需求。"
+          },
+          {
+            "text": "Talk to twenty customers before you write a single line of code, and be brutally honest about what you hear.",
+            "translation_zh": "在写一行代码之前，先和二十个客户谈谈，并且对你听到的东西要极其坦诚。"
+          }
+        ],
+        "summary_zh": "一位创业者分享三次失败教训：融资后招人过快导致资金耗尽，追逐不存在的市场，误把热情当需求。建议先与20个客户交流再写代码，并坦诚面对反馈。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.65,
+      "raw_response": "{\n  \"topic\": \"职场成长\",\n  \"subtopic\": \"创业失败教训\",\n  \"cefr_level\": \"B2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\"seed round\", \"runway\", \"the writing was on the wall\", \"chasing a market\", \"enthusiasm\", \"demand\", \"brutally honest\", \"startup\", \"customers\", \"code\"],\n  \"expressions\": [\n    {\"text\": \"seed round\", \"meaning_zh\": \"种子轮融资\", \"example\": \"They raised a $2M seed round.\"},\n    {\"text\": \"runway\", \"meaning_zh\": \"资金可维持的时间\", \"example\": \"We need to extend our runway by cutting costs.\"},\n    {\"text\": \"the writing was on the wall\", \"meaning_zh\": \"不祥之兆已现\", \"example\": \"The writing was on the wall for the company's failure.\"},\n    {\"text\": \"chasing a market\", \"meaning_zh\": \"追逐市场\", \"example\": \"They were chasing a market that didn't exist.\"},\n    {\"text\": \"mistook A for B\", \"meaning_zh\": \"把A误认为B\", \"example\": \"I mistook her silence for agreement.\"},\n    {\"text\": \"be brutally honest\", \"meaning_zh\": \"极其坦诚\", \"example\": \"Be brutally honest about your weaknesses.\"}\n  ],\n  \"grammar_points\": [\"过去时\", \"过去完成时\", \"动名词作主语\", \"祈使句\"],\n  \"key_sentences\": [\n    {\"text\": \"We raised a seed round, hired too fast, and then watched the runway shrink month after month.\", \"translation_zh\": \"我们融了种子轮，招人太快，然后看着资金一个月一个月地减少。\"},\n    {\"text\": \"Looking back, the writing was on the wall long before we admitted it.\", \"translation_zh\": \"回头看，早在我們承认之前，不祥之兆就已经很明显了。\"},\n    {\"text\": \"We were chasing a market that didn't exist yet, and we mistook early enthusiasm for real demand.\", \"translation_zh\": \"我们在追逐一个尚不存在的市场，把早期的热情误当成了真实需求。\"},\n    {\"text\": \"Talk to twenty customers before you write a single line of code, and be brutally honest about what you hear.\", \"translation_zh\": \"在写一行代码之前，先和二十个客户谈谈，并且对你听到的东西要极其坦诚。\"}\n  ],\n  \"summary_zh\": \"一位创业者分享三次失败教训：融资后招人过快导致资金耗尽，追逐不存在的市场，误把热情当需求。建议先与20个客户交流再写代码，并坦诚面对反馈。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 0.5,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.8,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.8625
+      }
+    },
+    {
+      "id": "career-negotiation-07",
+      "title": "The salary negotiation line that works",
+      "category": "职场",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "职场成长",
+        "subtopic": "薪资谈判技巧",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "salary negotiation",
+          "excited",
+          "role",
+          "make this work",
+          "talk about the number",
+          "quiet",
+          "fill the silence",
+          "cave in",
+          "leave money on the table",
+          "every single time"
+        ],
+        "expressions": [
+          {
+            "text": "make this work",
+            "meaning_zh": "让这件事成功/行得通",
+            "example": "I really want to make this work for both of us."
+          },
+          {
+            "text": "talk about the number",
+            "meaning_zh": "谈谈薪资数字",
+            "example": "Can we talk about the number before I accept?"
+          },
+          {
+            "text": "go quiet",
+            "meaning_zh": "保持沉默",
+            "example": "After you make the offer, go quiet and wait."
+          },
+          {
+            "text": "fill the silence",
+            "meaning_zh": "打破沉默（说话）",
+            "example": "Don't fill the silence; let them respond first."
+          },
+          {
+            "text": "cave in",
+            "meaning_zh": "屈服，让步",
+            "example": "Most people cave in and accept the first offer."
+          },
+          {
+            "text": "leave money on the table",
+            "meaning_zh": "错失赚钱的机会",
+            "example": "If you don't negotiate, you leave money on the table."
+          }
+        ],
+        "grammar_points": [
+          "祈使句",
+          "定语从句",
+          "一般现在时"
+        ],
+        "key_sentences": [
+          {
+            "text": "I am really excited about this role, and I want to make this work, so can we talk about the number.",
+            "translation_zh": "我对这个职位非常兴奋，我想让这件事成功，所以我们可以谈谈薪资数字吗？"
+          },
+          {
+            "text": "Then you go quiet.",
+            "translation_zh": "然后你保持沉默。"
+          },
+          {
+            "text": "Do not fill the silence.",
+            "translation_zh": "不要打破沉默。"
+          },
+          {
+            "text": "Most people cave in about four seconds in, and they leave money on the table every single time.",
+            "translation_zh": "大多数人在大约四秒内就屈服了，他们每次都错失赚钱的机会。"
+          }
+        ],
+        "summary_zh": "视频介绍了一句有效的薪资谈判话术：表达对职位的热情后，询问薪资数字，然后保持沉默，不要急于填补沉默，否则容易让步并错失机会。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.22,
+      "raw_response": "{\n  \"topic\": \"职场成长\",\n  \"subtopic\": \"薪资谈判技巧\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\"salary negotiation\", \"excited\", \"role\", \"make this work\", \"talk about the number\", \"quiet\", \"fill the silence\", \"cave in\", \"leave money on the table\", \"every single time\"],\n  \"expressions\": [\n    {\"text\": \"make this work\", \"meaning_zh\": \"让这件事成功/行得通\", \"example\": \"I really want to make this work for both of us.\"},\n    {\"text\": \"talk about the number\", \"meaning_zh\": \"谈谈薪资数字\", \"example\": \"Can we talk about the number before I accept?\"},\n    {\"text\": \"go quiet\", \"meaning_zh\": \"保持沉默\", \"example\": \"After you make the offer, go quiet and wait.\"},\n    {\"text\": \"fill the silence\", \"meaning_zh\": \"打破沉默（说话）\", \"example\": \"Don't fill the silence; let them respond first.\"},\n    {\"text\": \"cave in\", \"meaning_zh\": \"屈服，让步\", \"example\": \"Most people cave in and accept the first offer.\"},\n    {\"text\": \"leave money on the table\", \"meaning_zh\": \"错失赚钱的机会\", \"example\": \"If you don't negotiate, you leave money on the table.\"}\n  ],\n  \"grammar_points\": [\"祈使句\", \"定语从句\", \"一般现在时\"],\n  \"key_sentences\": [\n    {\"text\": \"I am really excited about this role, and I want to make this work, so can we talk about the number.\", \"translation_zh\": \"我对这个职位非常兴奋，我想让这件事成功，所以我们可以谈谈薪资数字吗？\"},\n    {\"text\": \"Then you go quiet.\", \"translation_zh\": \"然后你保持沉默。\"},\n    {\"text\": \"Do not fill the silence.\", \"translation_zh\": \"不要打破沉默。\"},\n    {\"text\": \"Most people cave in about four seconds in, and they leave money on the table every single time.\", \"translation_zh\": \"大多数人在大约四秒内就屈服了，他们每次都错失赚钱的机会。\"}\n  ],\n  \"summary_zh\": \"视频介绍了一句有效的薪资谈判话术：表达对职位的热情后，询问薪资数字，然后保持沉默，不要急于填补沉默，否则容易让步并错失机会。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.7,
+        "grammar_quality": 0.5,
+        "key_sentence_quality": 0.86,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.8657
+      }
+    },
+    {
+      "id": "ai-tech-tutorial-08",
+      "title": "Fine-tuning vs prompting, explained simply",
+      "category": "教程",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "AI 科技",
+        "subtopic": "大模型提示工程与微调",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.82,
+        "keywords": [
+          "prompting",
+          "fine-tuning",
+          "model",
+          "weights",
+          "rule of thumb",
+          "plain language",
+          "adjust",
+          "imitate",
+          "house style",
+          "cheaper"
+        ],
+        "expressions": [
+          {
+            "text": "on the other hand",
+            "meaning_zh": "另一方面",
+            "example": "Fine-tuning is powerful; on the other hand, it costs more."
+          },
+          {
+            "text": "The rule of thumb",
+            "meaning_zh": "经验法则；一般原则",
+            "example": "The rule of thumb is to start with the simplest solution."
+          },
+          {
+            "text": "it is worth doing",
+            "meaning_zh": "值得做某事",
+            "example": "If the task is repeated often, it is worth fine-tuning."
+          },
+          {
+            "text": "house style",
+            "meaning_zh": "（机构或品牌的）固定风格",
+            "example": "The model can imitate our company's house style."
+          },
+          {
+            "text": "in plain language",
+            "meaning_zh": "用通俗易懂的语言",
+            "example": "Describe the task in plain language."
+          },
+          {
+            "text": "dramatically cheaper",
+            "meaning_zh": "便宜得多；大幅降低",
+            "example": "Prompting is dramatically cheaper than fine-tuning."
+          }
+        ],
+        "grammar_points": [
+          "祈使句",
+          "if 条件句",
+          "动名词作主语/宾语",
+          "比较级"
+        ],
+        "key_sentences": [
+          {
+            "text": "Prompting means you keep the model as it is and describe what you want in plain language.",
+            "translation_zh": "提示意味着你保持模型原样，并用通俗的语言描述你想要什么。"
+          },
+          {
+            "text": "The rule of thumb is straightforward.",
+            "translation_zh": "经验法则很简单。"
+          },
+          {
+            "text": "If you can describe the task in a paragraph, prompt it.",
+            "translation_zh": "如果你能用一段话描述这个任务，就用提示。"
+          },
+          {
+            "text": "If you need the model to imitate a very specific house style, then it is worth fine-tuning.",
+            "translation_zh": "如果你需要模型模仿一种非常特定的固定风格，那就值得微调。"
+          },
+          {
+            "text": "Always try prompting first, because it is dramatically cheaper.",
+            "translation_zh": "总是先尝试提示，因为它便宜得多。"
+          }
+        ],
+        "summary_zh": "视频用简单语言解释提示与微调的区别，并给出选择建议：能用一段话描述任务就用提示，需要模仿特定风格才考虑微调，且提示成本低得多。",
+        "recommended_task": "跟读并复述"
+      },
+      "attempts": 1,
+      "elapsed": 2.9,
+      "raw_response": "{\"topic\":\"AI 科技\",\"subtopic\":\"大模型提示工程与微调\",\"cefr_level\":\"B1\",\"accent\":\"美音\",\"speech_speed\":\"中等\",\"learning_value\":0.82,\"keywords\":[\"prompting\",\"fine-tuning\",\"model\",\"weights\",\"rule of thumb\",\"plain language\",\"adjust\",\"imitate\",\"house style\",\"cheaper\"],\"expressions\":[{\"text\":\"on the other hand\",\"meaning_zh\":\"另一方面\",\"example\":\"Fine-tuning is powerful; on the other hand, it costs more.\"},{\"text\":\"The rule of thumb\",\"meaning_zh\":\"经验法则；一般原则\",\"example\":\"The rule of thumb is to start with the simplest solution.\"},{\"text\":\"it is worth doing\",\"meaning_zh\":\"值得做某事\",\"example\":\"If the task is repeated often, it is worth fine-tuning.\"},{\"text\":\"house style\",\"meaning_zh\":\"（机构或品牌的）固定风格\",\"example\":\"The model can imitate our company's house style.\"},{\"text\":\"in plain language\",\"meaning_zh\":\"用通俗易懂的语言\",\"example\":\"Describe the task in plain language.\"},{\"text\":\"dramatically cheaper\",\"meaning_zh\":\"便宜得多；大幅降低\",\"example\":\"Prompting is dramatically cheaper than fine-tuning.\"}],\"grammar_points\":[\"祈使句\",\"if 条件句\",\"动名词作主语/宾语\",\"比较级\"],\"key_sentences\":[{\"text\":\"Prompting means you keep the model as it is and describe what you want in plain language.\",\"translation_zh\":\"提示意味着你保持模型原样，并用通俗的语言描述你想要什么。\"},{\"text\":\"The rule of thumb is straightforward.\",\"translation_zh\":\"经验法则很简单。\"},{\"text\":\"If you can describe the task in a paragraph, prompt it.\",\"translation_zh\":\"如果你能用一段话描述这个任务，就用提示。\"},{\"text\":\"If you need the model to imitate a very specific house style, then it is worth fine-tuning.\",\"translation_zh\":\"如果你需要模型模仿一种非常特定的固定风格，那就值得微调。\"},{\"text\":\"Always try prompting first, because it is dramatically cheaper.\",\"translation_zh\":\"总是先尝试提示，因为它便宜得多。\"}],\"summary_zh\":\"视频用简单语言解释提示与微调的区别，并给出选择建议：能用一段话描述任务就用提示，需要模仿特定风格才考虑微调，且提示成本低得多。\",\"recommended_task\":\"跟读并复述\"}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.84,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.9396
+      }
+    },
+    {
+      "id": "ai-tech-skeptic-09",
+      "title": "The metaverse hype, two years later",
+      "category": "AI / 科技",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "科技评论",
+        "subtopic": "元宇宙炒作反思",
+        "cefr_level": "B2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.82,
+        "keywords": [
+          "metaverse",
+          "hype",
+          "headsets",
+          "fizzled out",
+          "clunky",
+          "isolating",
+          "articulate",
+          "immersive computing",
+          "substance",
+          "keynote"
+        ],
+        "expressions": [
+          {
+            "text": "fast forward to today",
+            "meaning_zh": "快进到今天；转眼到现在",
+            "example": "Fast forward to today, and the technology has become part of daily life."
+          },
+          {
+            "text": "fizzled out",
+            "meaning_zh": "逐渐消失；虎头蛇尾地结束",
+            "example": "The trend fizzled out after a few months."
+          },
+          {
+            "text": "got ahead of the substance",
+            "meaning_zh": "炒作超过了实质内容",
+            "example": "The marketing got ahead of the substance, so customers were disappointed."
+          },
+          {
+            "text": "as it usually does",
+            "meaning_zh": "正如它通常发生的那样",
+            "example": "The project was delayed, as it usually does."
+          },
+          {
+            "text": "articulate a problem",
+            "meaning_zh": "清晰表达一个问题",
+            "example": "She could articulate the problem better than anyone else."
+          }
+        ],
+        "grammar_points": [
+          "过去完成时（had fizzled out 等）",
+          "现在完成时（has quietly fizzled out）",
+          "比较级（better than a laptop）",
+          "宾语从句（I am saying that...）"
+        ],
+        "key_sentences": [
+          {
+            "text": "Two years ago every keynote ended with a promise that we would all be working in headsets.",
+            "translation_zh": "两年前，每一场主题演讲都以一个承诺结束：我们都将在头显里工作。"
+          },
+          {
+            "text": "Fast forward to today, and the whole thing has quietly fizzled out.",
+            "translation_zh": "快进到今天，整件事已经悄无声息地不了了之了。"
+          },
+          {
+            "text": "The hardware was clunky, the experience was isolating, and nobody could articulate a single problem it solved better than a laptop.",
+            "translation_zh": "硬件笨重，体验孤立，而且没有人能说清楚它解决了一个笔记本电脑解决不了的问题。"
+          },
+          {
+            "text": "I am not saying immersive computing is dead.",
+            "translation_zh": "我不是说沉浸式计算已死。"
+          },
+          {
+            "text": "I am saying the hype got ahead of the substance, as it usually does.",
+            "translation_zh": "我是说炒作超过了实质内容，就像通常发生的那样。"
+          }
+        ],
+        "summary_zh": "这段 90 秒的视频回顾了元宇宙炒作两年后的现状，指出硬件笨重、体验孤立、缺乏实际用途，最终热度消退，但作者认为沉浸式计算并未消亡，只是炒作超过了实质。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.68,
+      "raw_response": "{\n  \"topic\": \"科技评论\",\n  \"subtopic\": \"元宇宙炒作反思\",\n  \"cefr_level\": \"B2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.82,\n  \"keywords\": [\n    \"metaverse\",\n    \"hype\",\n    \"headsets\",\n    \"fizzled out\",\n    \"clunky\",\n    \"isolating\",\n    \"articulate\",\n    \"immersive computing\",\n    \"substance\",\n    \"keynote\"\n  ],\n  \"expressions\": [\n    {\n      \"text\": \"fast forward to today\",\n      \"meaning_zh\": \"快进到今天；转眼到现在\",\n      \"example\": \"Fast forward to today, and the technology has become part of daily life.\"\n    },\n    {\n      \"text\": \"fizzled out\",\n      \"meaning_zh\": \"逐渐消失；虎头蛇尾地结束\",\n      \"example\": \"The trend fizzled out after a few months.\"\n    },\n    {\n      \"text\": \"got ahead of the substance\",\n      \"meaning_zh\": \"炒作超过了实质内容\",\n      \"example\": \"The marketing got ahead of the substance, so customers were disappointed.\"\n    },\n    {\n      \"text\": \"as it usually does\",\n      \"meaning_zh\": \"正如它通常发生的那样\",\n      \"example\": \"The project was delayed, as it usually does.\"\n    },\n    {\n      \"text\": \"articulate a problem\",\n      \"meaning_zh\": \"清晰表达一个问题\",\n      \"example\": \"She could articulate the problem better than anyone else.\"\n    }\n  ],\n  \"grammar_points\": [\n    \"过去完成时（had fizzled out 等）\",\n    \"现在完成时（has quietly fizzled out）\",\n    \"比较级（better than a laptop）\",\n    \"宾语从句（I am saying that...）\"\n  ],\n  \"key_sentences\": [\n    {\n      \"text\": \"Two years ago every keynote ended with a promise that we would all be working in headsets.\",\n      \"translation_zh\": \"两年前，每一场主题演讲都以一个承诺结束：我们都将在头显里工作。\"\n    },\n    {\n      \"text\": \"Fast forward to today, and the whole thing has quietly fizzled out.\",\n      \"translation_zh\": \"快进到今天，整件事已经悄无声息地不了了之了。\"\n    },\n    {\n      \"text\": \"The hardware was clunky, the experience was isolating, and nobody could articulate a single problem it solved better than a laptop.\",\n      \"translation_zh\": \"硬件笨重，体验孤立，而且没有人能说清楚它解决了一个笔记本电脑解决不了的问题。\"\n    },\n    {\n      \"text\": \"I am not saying immersive computing is dead.\",\n      \"translation_zh\": \"我不是说沉浸式计算已死。\"\n    },\n    {\n      \"text\": \"I am saying the hype got ahead of the substance, as it usually does.\",\n      \"translation_zh\": \"我是说炒作超过了实质内容，就像通常发生的那样。\"\n    }\n  ],\n  \"summary_zh\": \"这段 90 秒的视频回顾了元宇宙炒作两年后的现状，指出硬件笨重、体验孤立、缺乏实际用途，最终热度消退，但作者认为沉浸式计算并未消亡，只是炒作超过了实质。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.76,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.9282
+      }
+    },
+    {
+      "id": "lifestyle-morning-10",
+      "title": "My 5am morning routine, honestly",
+      "category": "生活方式",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "生活方式",
+        "subtopic": "晨间习惯与自律",
+        "cefr_level": "A2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.72,
+        "keywords": [
+          "morning routine",
+          "get up",
+          "special",
+          "notebook",
+          "cold shower",
+          "meditation",
+          "impressive",
+          "start the day",
+          "needs something",
+          "realistic"
+        ],
+        "expressions": [
+          {
+            "text": "get up at five",
+            "meaning_zh": "五点起床",
+            "example": "I get up at five every morning."
+          },
+          {
+            "text": "do anything special",
+            "meaning_zh": "做什么特别的事",
+            "example": "I don't do anything special on weekends."
+          },
+          {
+            "text": "That's it.",
+            "meaning_zh": "就这样；仅此而已",
+            "example": "I just drink water and run. That's it."
+          },
+          {
+            "text": "The point is not to...",
+            "meaning_zh": "重点不是……",
+            "example": "The point is not to win, but to try."
+          },
+          {
+            "text": "start the day",
+            "meaning_zh": "开始新的一天",
+            "example": "A good breakfast helps me start the day."
+          },
+          {
+            "text": "needs something from me",
+            "meaning_zh": "需要我帮忙/有求于我",
+            "example": "I need quiet time before everyone needs something from me."
+          }
+        ],
+        "grammar_points": [
+          "一般现在时表示日常习惯",
+          "并列句与逗号连接多个动作",
+          "not to do 不定式作表语"
+        ],
+        "key_sentences": [
+          {
+            "text": "I get up at five, but I don't do anything special.",
+            "translation_zh": "我五点起床，但我并不做什么特别的事。"
+          },
+          {
+            "text": "I drink a glass of water, I make coffee, and I sit down with a notebook for ten minutes.",
+            "translation_zh": "我喝一杯水，煮咖啡，然后拿着笔记本坐十分钟。"
+          },
+          {
+            "text": "No cold shower, no hour of meditation.",
+            "translation_zh": "不洗冷水澡，也不冥想一小时。"
+          },
+          {
+            "text": "The point is not to be impressive.",
+            "translation_zh": "重点不是要让人印象深刻。"
+          },
+          {
+            "text": "The point is to start the day before everybody needs something from me.",
+            "translation_zh": "重点是趁大家还没开始需要我之前，开启新的一天。"
+          }
+        ],
+        "summary_zh": "作者分享了自己真实的五点晨间习惯：喝水、煮咖啡、写十分钟笔记，强调晨间 routine 的意义不是炫酷，而是在别人需要自己之前先拥有一段属于自己的时间。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.14,
+      "raw_response": "{\"topic\":\"生活方式\",\"subtopic\":\"晨间习惯与自律\",\"cefr_level\":\"A2\",\"accent\":\"美音\",\"speech_speed\":\"中等\",\"learning_value\":0.72,\"keywords\":[\"morning routine\",\"get up\",\"special\",\"notebook\",\"cold shower\",\"meditation\",\"impressive\",\"start the day\",\"needs something\",\"realistic\"],\"expressions\":[{\"text\":\"get up at five\",\"meaning_zh\":\"五点起床\",\"example\":\"I get up at five every morning.\"},{\"text\":\"do anything special\",\"meaning_zh\":\"做什么特别的事\",\"example\":\"I don't do anything special on weekends.\"},{\"text\":\"That's it.\",\"meaning_zh\":\"就这样；仅此而已\",\"example\":\"I just drink water and run. That's it.\"},{\"text\":\"The point is not to...\",\"meaning_zh\":\"重点不是……\",\"example\":\"The point is not to win, but to try.\"},{\"text\":\"start the day\",\"meaning_zh\":\"开始新的一天\",\"example\":\"A good breakfast helps me start the day.\"},{\"text\":\"needs something from me\",\"meaning_zh\":\"需要我帮忙/有求于我\",\"example\":\"I need quiet time before everyone needs something from me.\"}],\"grammar_points\":[\"一般现在时表示日常习惯\",\"并列句与逗号连接多个动作\",\"not to do 不定式作表语\"],\"key_sentences\":[{\"text\":\"I get up at five, but I don't do anything special.\",\"translation_zh\":\"我五点起床，但我并不做什么特别的事。\"},{\"text\":\"I drink a glass of water, I make coffee, and I sit down with a notebook for ten minutes.\",\"translation_zh\":\"我喝一杯水，煮咖啡，然后拿着笔记本坐十分钟。\"},{\"text\":\"No cold shower, no hour of meditation.\",\"translation_zh\":\"不洗冷水澡，也不冥想一小时。\"},{\"text\":\"The point is not to be impressive.\",\"translation_zh\":\"重点不是要让人印象深刻。\"},{\"text\":\"The point is to start the day before everybody needs something from me.\",\"translation_zh\":\"重点是趁大家还没开始需要我之前，开启新的一天。\"}],\"summary_zh\":\"作者分享了自己真实的五点晨间习惯：喝水、煮咖啡、写十分钟笔记，强调晨间 routine 的意义不是炫酷，而是在别人需要自己之前先拥有一段属于自己的时间。\",\"recommended_task\":\"跟读\"}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.4,
+        "grammar_quality": 0.2667,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 0.9429,
+        "hallucination": 1.0,
+        "overall": 0.8014
+      }
+    },
+    {
+      "id": "lifestyle-tinyhome-11",
+      "title": "Living in a 20 square meter apartment",
+      "category": "生活方式",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "生活方式",
+        "subtopic": "极简主义与微型住宅",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.8,
+        "keywords": [
+          "tiny apartment",
+          "square meters",
+          "get rid of",
+          "fit everything",
+          "honest answer",
+          "earn its space",
+          "deliberate",
+          "living small",
+          "object",
+          "bring home"
+        ],
+        "expressions": [
+          {
+            "text": "get rid of",
+            "meaning_zh": "摆脱；扔掉；处理掉",
+            "example": "I got rid of most of my old clothes."
+          },
+          {
+            "text": "It turns out (that)...",
+            "meaning_zh": "结果发现……；原来……",
+            "example": "It turns out that I didn't need to buy a car."
+          },
+          {
+            "text": "not nearly as much as",
+            "meaning_zh": "远没有……那么多",
+            "example": "She doesn't earn nearly as much as she deserves."
+          },
+          {
+            "text": "earn its space",
+            "meaning_zh": "值得占用空间；配得上所占的地方",
+            "example": "If a book doesn't earn its space, I donate it."
+          },
+          {
+            "text": "be deliberate about",
+            "meaning_zh": "对……深思熟虑；在……上刻意为之",
+            "example": "We need to be deliberate about how we spend our time."
+          },
+          {
+            "text": "living small",
+            "meaning_zh": "小空间生活；极简居住",
+            "example": "Living small taught me to value experiences over things."
+          }
+        ],
+        "grammar_points": [
+          "一般现在时",
+          "现在完成时",
+          "定语从句（that/if 引导）",
+          "被动语态（forced me to... 实为主动，但含使役结构）"
+        ],
+        "key_sentences": [
+          {
+            "text": "People always ask me how I fit everything into twenty square meters.",
+            "translation_zh": "人们总是问我如何把所有东西塞进二十平方米里。"
+          },
+          {
+            "text": "The honest answer is that I got rid of most of it.",
+            "translation_zh": "诚实的答案是，我把大部分东西都扔掉了。"
+          },
+          {
+            "text": "It turns out you don't need nearly as much as you think.",
+            "translation_zh": "事实证明，你需要的远没有你以为的那么多。"
+          },
+          {
+            "text": "Every object I own has a place, and if something doesn't earn its space, it goes.",
+            "translation_zh": "我拥有的每件物品都有固定位置，如果某样东西不值得占用空间，它就会被处理掉。"
+          },
+          {
+            "text": "Living small forced me to be deliberate about what I bring home.",
+            "translation_zh": "小空间生活迫使我对带回家的每样东西都深思熟虑。"
+          }
+        ],
+        "summary_zh": "作者分享了自己在二十平方米小公寓里的极简生活心得：扔掉多余物品，让每件物品都有固定位置，只保留真正值得占用空间的东西。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 4.09,
+      "raw_response": "{\n  \"topic\": \"生活方式\",\n  \"subtopic\": \"极简主义与微型住宅\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.8,\n  \"keywords\": [\"tiny apartment\", \"square meters\", \"get rid of\", \"fit everything\", \"honest answer\", \"earn its space\", \"deliberate\", \"living small\", \"object\", \"bring home\"],\n  \"expressions\": [\n    {\"text\": \"get rid of\", \"meaning_zh\": \"摆脱；扔掉；处理掉\", \"example\": \"I got rid of most of my old clothes.\"},\n    {\"text\": \"It turns out (that)...\", \"meaning_zh\": \"结果发现……；原来……\", \"example\": \"It turns out that I didn't need to buy a car.\"},\n    {\"text\": \"not nearly as much as\", \"meaning_zh\": \"远没有……那么多\", \"example\": \"She doesn't earn nearly as much as she deserves.\"},\n    {\"text\": \"earn its space\", \"meaning_zh\": \"值得占用空间；配得上所占的地方\", \"example\": \"If a book doesn't earn its space, I donate it.\"},\n    {\"text\": \"be deliberate about\", \"meaning_zh\": \"对……深思熟虑；在……上刻意为之\", \"example\": \"We need to be deliberate about how we spend our time.\"},\n    {\"text\": \"living small\", \"meaning_zh\": \"小空间生活；极简居住\", \"example\": \"Living small taught me to value experiences over things.\"}\n  ],\n  \"grammar_points\": [\"一般现在时\", \"现在完成时\", \"定语从句（that/if 引导）\", \"被动语态（forced me to... 实为主动，但含使役结构）\"],\n  \"key_sentences\": [\n    {\"text\": \"People always ask me how I fit everything into twenty square meters.\", \"translation_zh\": \"人们总是问我如何把所有东西塞进二十平方米里。\"},\n    {\"text\": \"The honest answer is that I got rid of most of it.\", \"translation_zh\": \"诚实的答案是，我把大部分东西都扔掉了。\"},\n    {\"text\": \"It turns out you don't need nearly as much as you think.\", \"translation_zh\": \"事实证明，你需要的远没有你以为的那么多。\"},\n    {\"text\": \"Every object I own has a place, and if something doesn't earn its space, it goes.\", \"translation_zh\": \"我拥有的每件物品都有固定位置，如果某样东西不值得占用空间，它就会被处理掉。\"},\n    {\"text\": \"Living small forced me to be deliberate about what I bring home.\", \"translation_zh\": \"小空间生活迫使我对带回家的每样东西都深思熟虑。\"}\n  ],\n  \"summary_zh\": \"作者分享了自己在二十平方米小公寓里的极简生活心得：扔掉多余物品，让每件物品都有固定位置，只保留真正值得占用空间的东西。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.3167,
+        "grammar_quality": 0.55,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 0.9091,
+        "overall": 0.8251
+      }
+    },
+    {
+      "id": "lifestyle-cooking-12",
+      "title": "The only pasta sauce you need",
+      "category": "教程",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "美食烹饪",
+        "subtopic": "意面酱汁做法",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.75,
+        "keywords": [
+          "pasta sauce",
+          "olive oil",
+          "garlic",
+          "sizzle",
+          "brown",
+          "bitter",
+          "tomatoes",
+          "bubble away",
+          "season",
+          "taste"
+        ],
+        "expressions": [
+          {
+            "text": "a good glug of olive oil",
+            "meaning_zh": "一大口/适量（较多）的橄榄油",
+            "example": "Start by heating a good glug of olive oil over medium heat."
+          },
+          {
+            "text": "let it sizzle",
+            "meaning_zh": "让它发出滋滋声（煎炒）",
+            "example": "Add the garlic and let it sizzle."
+          },
+          {
+            "text": "don't let it brown",
+            "meaning_zh": "别让它变焦黄",
+            "example": "Don't let it brown, or it turns bitter."
+          },
+          {
+            "text": "bubble away",
+            "meaning_zh": "咕嘟咕嘟地冒泡（持续炖煮）",
+            "example": "Let it bubble away for about fifteen minutes."
+          },
+          {
+            "text": "the difference between fine and really good",
+            "meaning_zh": "一般和非常好之间的差别",
+            "example": "That last part is the one everybody skips, and it's the difference between fine and really good."
+          }
+        ],
+        "grammar_points": [
+          "祈使句",
+          "时间状语从句",
+          "现在完成时（隐含）"
+        ],
+        "key_sentences": [
+          {
+            "text": "Start by heating a good glug of olive oil over medium heat.",
+            "translation_zh": "先用中火加热一大口橄榄油。"
+          },
+          {
+            "text": "Add the garlic and let it sizzle, but don't let it brown, or it turns bitter.",
+            "translation_zh": "加入大蒜，让它滋滋作响，但别让它变焦黄，否则会变苦。"
+          },
+          {
+            "text": "Then in goes the tomatoes.",
+            "translation_zh": "然后放入番茄。"
+          },
+          {
+            "text": "Let it bubble away for about fifteen minutes.",
+            "translation_zh": "让它咕嘟咕嘟地煮大约十五分钟。"
+          },
+          {
+            "text": "Season it, taste it, and season it again.",
+            "translation_zh": "调味，尝一下，然后再调味。"
+          }
+        ],
+        "summary_zh": "这是一个五分钟意面酱汁的烹饪教程，用简单英语讲解步骤和要点，适合学习烹饪相关表达和祈使句。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 2.75,
+      "raw_response": "{\n  \"topic\": \"美食烹饪\",\n  \"subtopic\": \"意面酱汁做法\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.75,\n  \"keywords\": [\"pasta sauce\", \"olive oil\", \"garlic\", \"sizzle\", \"brown\", \"bitter\", \"tomatoes\", \"bubble away\", \"season\", \"taste\"],\n  \"expressions\": [\n    {\"text\": \"a good glug of olive oil\", \"meaning_zh\": \"一大口/适量（较多）的橄榄油\", \"example\": \"Start by heating a good glug of olive oil over medium heat.\"},\n    {\"text\": \"let it sizzle\", \"meaning_zh\": \"让它发出滋滋声（煎炒）\", \"example\": \"Add the garlic and let it sizzle.\"},\n    {\"text\": \"don't let it brown\", \"meaning_zh\": \"别让它变焦黄\", \"example\": \"Don't let it brown, or it turns bitter.\"},\n    {\"text\": \"bubble away\", \"meaning_zh\": \"咕嘟咕嘟地冒泡（持续炖煮）\", \"example\": \"Let it bubble away for about fifteen minutes.\"},\n    {\"text\": \"the difference between fine and really good\", \"meaning_zh\": \"一般和非常好之间的差别\", \"example\": \"That last part is the one everybody skips, and it's the difference between fine and really good.\"}\n  ],\n  \"grammar_points\": [\"祈使句\", \"时间状语从句\", \"现在完成时（隐含）\"],\n  \"key_sentences\": [\n    {\"text\": \"Start by heating a good glug of olive oil over medium heat.\", \"translation_zh\": \"先用中火加热一大口橄榄油。\"},\n    {\"text\": \"Add the garlic and let it sizzle, but don't let it brown, or it turns bitter.\", \"translation_zh\": \"加入大蒜，让它滋滋作响，但别让它变焦黄，否则会变苦。\"},\n    {\"text\": \"Then in goes the tomatoes.\", \"translation_zh\": \"然后放入番茄。\"},\n    {\"text\": \"Let it bubble away for about fifteen minutes.\", \"translation_zh\": \"让它咕嘟咕嘟地煮大约十五分钟。\"},\n    {\"text\": \"Season it, taste it, and season it again.\", \"translation_zh\": \"调味，尝一下，然后再调味。\"}\n  ],\n  \"summary_zh\": \"这是一个五分钟意面酱汁的烹饪教程，用简单英语讲解步骤和要点，适合学习烹饪相关表达和祈使句。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.84,
+        "grammar_quality": 0.1333,
+        "key_sentence_quality": 0.944,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.8453
+      }
+    },
+    {
+      "id": "growth-mindset-13",
+      "title": "This changed my mindset",
+      "category": "个人成长",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "个人成长",
+        "subtopic": "心态建设与自我管理",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "mindset",
+          "fix",
+          "incrementally",
+          "confidence",
+          "promise",
+          "evidence",
+          "trivial",
+          "negotiate"
+        ],
+        "expressions": [
+          {
+            "text": "fix your life",
+            "meaning_zh": "彻底改变/解决你的人生问题",
+            "example": "You can't fix your life overnight."
+          },
+          {
+            "text": "keep that small thing fixed",
+            "meaning_zh": "让那件小事保持已解决的状态",
+            "example": "Do one thing and keep it fixed."
+          },
+          {
+            "text": "every small promise you keep to yourself",
+            "meaning_zh": "你对自己信守的每一个小承诺",
+            "example": "Every small promise you keep to yourself builds trust."
+          },
+          {
+            "text": "your word means something",
+            "meaning_zh": "你的话是有分量的/你是守信用的",
+            "example": "When you keep promises, your word means something."
+          },
+          {
+            "text": "do not negotiate with yourself",
+            "meaning_zh": "不要和自己讨价还价/不要给自己找借口",
+            "example": "Once you decide, do not negotiate with yourself."
+          }
+        ],
+        "grammar_points": [
+          "一般将来时（be going to）",
+          "现在完成时（has/have + 过去分词）",
+          "定语从句（that/which 引导）",
+          "祈使句（Pick something... do not negotiate...）"
+        ],
+        "key_sentences": [
+          {
+            "text": "You are not going to fix your life in one afternoon.",
+            "translation_zh": "你不可能在一个下午就把人生彻底理顺。"
+          },
+          {
+            "text": "What you can do is fix one small thing today, and then keep that small thing fixed.",
+            "translation_zh": "你能做的是今天解决一件小事，然后让这件小事保持已解决的状态。"
+          },
+          {
+            "text": "That is how order gets built, incrementally, and it is also how confidence gets built, because every small promise you keep to yourself is evidence that your word means something.",
+            "translation_zh": "秩序就是这样一点一点建立起来的，自信也是如此，因为你对自己信守的每一个小承诺，都证明你的话是有分量的。"
+          },
+          {
+            "text": "So pick something almost trivial, and then do not negotiate with yourself about it.",
+            "translation_zh": "所以选一件几乎微不足道的小事，然后就不要再和自己讨价还价了。"
+          }
+        ],
+        "summary_zh": "这段短视频讲述如何通过每天完成并坚持一件小事来逐步建立秩序与自信，强调信守对自己的承诺、拒绝自我妥协。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.36,
+      "raw_response": "{\"topic\":\"个人成长\",\"subtopic\":\"心态建设与自我管理\",\"cefr_level\":\"B1\",\"accent\":\"美音\",\"speech_speed\":\"中等\",\"learning_value\":0.85,\"keywords\":[\"mindset\",\"fix\",\"incrementally\",\"confidence\",\"promise\",\"evidence\",\"trivial\",\"negotiate\"],\"expressions\":[{\"text\":\"fix your life\",\"meaning_zh\":\"彻底改变/解决你的人生问题\",\"example\":\"You can't fix your life overnight.\"},{\"text\":\"keep that small thing fixed\",\"meaning_zh\":\"让那件小事保持已解决的状态\",\"example\":\"Do one thing and keep it fixed.\"},{\"text\":\"every small promise you keep to yourself\",\"meaning_zh\":\"你对自己信守的每一个小承诺\",\"example\":\"Every small promise you keep to yourself builds trust.\"},{\"text\":\"your word means something\",\"meaning_zh\":\"你的话是有分量的/你是守信用的\",\"example\":\"When you keep promises, your word means something.\"},{\"text\":\"do not negotiate with yourself\",\"meaning_zh\":\"不要和自己讨价还价/不要给自己找借口\",\"example\":\"Once you decide, do not negotiate with yourself.\"}],\"grammar_points\":[\"一般将来时（be going to）\",\"现在完成时（has/have + 过去分词）\",\"定语从句（that/which 引导）\",\"祈使句（Pick something... do not negotiate...）\"],\"key_sentences\":[{\"text\":\"You are not going to fix your life in one afternoon.\",\"translation_zh\":\"你不可能在一个下午就把人生彻底理顺。\"},{\"text\":\"What you can do is fix one small thing today, and then keep that small thing fixed.\",\"translation_zh\":\"你能做的是今天解决一件小事，然后让这件小事保持已解决的状态。\"},{\"text\":\"That is how order gets built, incrementally, and it is also how confidence gets built, because every small promise you keep to yourself is evidence that your word means something.\",\"translation_zh\":\"秩序就是这样一点一点建立起来的，自信也是如此，因为你对自己信守的每一个小承诺，都证明你的话是有分量的。\"},{\"text\":\"So pick something almost trivial, and then do not negotiate with yourself about it.\",\"translation_zh\":\"所以选一件几乎微不足道的小事，然后就不要再和自己讨价还价了。\"}],\"summary_zh\":\"这段短视频讲述如何通过每天完成并坚持一件小事来逐步建立秩序与自信，强调信守对自己的承诺、拒绝自我妥协。\",\"recommended_task\":\"影子跟读\"}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.84,
+        "grammar_quality": 0.3625,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.8861
+      }
+    },
+    {
+      "id": "growth-anxiety-14",
+      "title": "How I stopped overthinking everything",
+      "category": "个人成长",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "心理健康",
+        "subtopic": "克服过度思考",
+        "cefr_level": "B2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "overthinking",
+          "trap",
+          "convince",
+          "go around in circles",
+          "loop",
+          "physical action",
+          "spiral",
+          "worry",
+          "productive",
+          "stupidly simple"
+        ],
+        "expressions": [
+          {
+            "text": "go around in circles",
+            "meaning_zh": "原地打转，毫无进展",
+            "example": "We kept going around in circles without making a decision."
+          },
+          {
+            "text": "break the loop",
+            "meaning_zh": "打破循环",
+            "example": "A short walk can help break the loop of negative thoughts."
+          },
+          {
+            "text": "nine times out of ten",
+            "meaning_zh": "十有八九，通常",
+            "example": "Nine times out of ten, he arrives late."
+          },
+          {
+            "text": "the spiral is gone",
+            "meaning_zh": "螺旋式上升的思绪消失了（指过度思考的恶性循环）",
+            "example": "After writing it down, the spiral was gone."
+          },
+          {
+            "text": "stupidly simple",
+            "meaning_zh": "简单到愚蠢的，极其简单的",
+            "example": "The solution was stupidly simple."
+          }
+        ],
+        "grammar_points": [
+          "现在完成时",
+          "定语从句",
+          "并列句",
+          "动名词作主语"
+        ],
+        "key_sentences": [
+          {
+            "text": "Overthinking feels productive, and that is the trap.",
+            "translation_zh": "过度思考感觉很有成效，而这正是陷阱。"
+          },
+          {
+            "text": "You convince yourself you are solving a problem, when really you are just going around in circles.",
+            "translation_zh": "你说服自己正在解决问题，而实际上你只是在原地打转。"
+          },
+          {
+            "text": "What broke the loop for me was a stupidly simple question.",
+            "translation_zh": "打破我这种循环的是一个简单到愚蠢的问题。"
+          },
+          {
+            "text": "What is the next physical action?",
+            "translation_zh": "下一个具体的行动是什么？"
+          },
+          {
+            "text": "Nine times out of ten, it takes two minutes, and the spiral is gone.",
+            "translation_zh": "十有八九，它只需要两分钟，然后那种螺旋式的思绪就消失了。"
+          }
+        ],
+        "summary_zh": "这段视频分享了克服过度思考的实用建议：通过问自己“下一个具体行动是什么”来打破思维循环。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.13,
+      "raw_response": "{\n  \"topic\": \"心理健康\",\n  \"subtopic\": \"克服过度思考\",\n  \"cefr_level\": \"B2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\"overthinking\", \"trap\", \"convince\", \"go around in circles\", \"loop\", \"physical action\", \"spiral\", \"worry\", \"productive\", \"stupidly simple\"],\n  \"expressions\": [\n    {\"text\": \"go around in circles\", \"meaning_zh\": \"原地打转，毫无进展\", \"example\": \"We kept going around in circles without making a decision.\"},\n    {\"text\": \"break the loop\", \"meaning_zh\": \"打破循环\", \"example\": \"A short walk can help break the loop of negative thoughts.\"},\n    {\"text\": \"nine times out of ten\", \"meaning_zh\": \"十有八九，通常\", \"example\": \"Nine times out of ten, he arrives late.\"},\n    {\"text\": \"the spiral is gone\", \"meaning_zh\": \"螺旋式上升的思绪消失了（指过度思考的恶性循环）\", \"example\": \"After writing it down, the spiral was gone.\"},\n    {\"text\": \"stupidly simple\", \"meaning_zh\": \"简单到愚蠢的，极其简单的\", \"example\": \"The solution was stupidly simple.\"}\n  ],\n  \"grammar_points\": [\"现在完成时\", \"定语从句\", \"并列句\", \"动名词作主语\"],\n  \"key_sentences\": [\n    {\"text\": \"Overthinking feels productive, and that is the trap.\", \"translation_zh\": \"过度思考感觉很有成效，而这正是陷阱。\"},\n    {\"text\": \"You convince yourself you are solving a problem, when really you are just going around in circles.\", \"translation_zh\": \"你说服自己正在解决问题，而实际上你只是在原地打转。\"},\n    {\"text\": \"What broke the loop for me was a stupidly simple question.\", \"translation_zh\": \"打破我这种循环的是一个简单到愚蠢的问题。\"},\n    {\"text\": \"What is the next physical action?\", \"translation_zh\": \"下一个具体的行动是什么？\"},\n    {\"text\": \"Nine times out of ten, it takes two minutes, and the spiral is gone.\", \"translation_zh\": \"十有八九，它只需要两分钟，然后那种螺旋式的思绪就消失了。\"}\n  ],\n  \"summary_zh\": \"这段视频分享了克服过度思考的实用建议：通过问自己“下一个具体行动是什么”来打破思维循环。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.34,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 0.9,
+        "overall": 0.8539
+      }
+    },
+    {
+      "id": "growth-habits-15",
+      "title": "Small habits, big change",
+      "category": "个人成长",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "个人成长",
+        "subtopic": "习惯养成",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.9,
+        "keywords": [
+          "habits",
+          "motivation",
+          "change",
+          "ridiculously easy",
+          "read",
+          "exercise",
+          "workout clothes",
+          "feelings",
+          "project managers"
+        ],
+        "expressions": [
+          {
+            "text": "ridiculously easy",
+            "meaning_zh": "极其简单，简单到荒谬的程度",
+            "example": "Make your goals ridiculously easy to achieve."
+          },
+          {
+            "text": "beat motivation",
+            "meaning_zh": "胜过动力，比动力更有效",
+            "example": "Small habits beat motivation every time."
+          },
+          {
+            "text": "workout clothes",
+            "meaning_zh": "运动服",
+            "example": "She sleeps in her workout clothes to exercise in the morning."
+          },
+          {
+            "text": "terrible project managers",
+            "meaning_zh": "糟糕的项目经理（比喻情绪管理不好）",
+            "example": "Feelings make terrible project managers, so don't rely on them."
+          }
+        ],
+        "grammar_points": [
+          "一般现在时",
+          "because 引导的原因状语从句",
+          "if 引导的条件状语从句",
+          "动名词作主语"
+        ],
+        "key_sentences": [
+          {
+            "text": "Your habits are not going to change because you feel motivated.",
+            "translation_zh": "你的习惯不会因为你感到有动力而改变。"
+          },
+          {
+            "text": "They change because you make them ridiculously easy.",
+            "translation_zh": "它们改变是因为你让它们变得极其简单。"
+          },
+          {
+            "text": "Motivation is a feeling, and feelings make terrible project managers.",
+            "translation_zh": "动力是一种感觉，而感觉是糟糕的项目经理。"
+          }
+        ],
+        "summary_zh": "这段视频强调微小的习惯比动力更能带来改变，建议把想做的事变得极其简单。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 2.39,
+      "raw_response": "{\n  \"topic\": \"个人成长\",\n  \"subtopic\": \"习惯养成\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.9,\n  \"keywords\": [\"habits\", \"motivation\", \"change\", \"ridiculously easy\", \"read\", \"exercise\", \"workout clothes\", \"feelings\", \"project managers\"],\n  \"expressions\": [\n    {\n      \"text\": \"ridiculously easy\",\n      \"meaning_zh\": \"极其简单，简单到荒谬的程度\",\n      \"example\": \"Make your goals ridiculously easy to achieve.\"\n    },\n    {\n      \"text\": \"beat motivation\",\n      \"meaning_zh\": \"胜过动力，比动力更有效\",\n      \"example\": \"Small habits beat motivation every time.\"\n    },\n    {\n      \"text\": \"workout clothes\",\n      \"meaning_zh\": \"运动服\",\n      \"example\": \"She sleeps in her workout clothes to exercise in the morning.\"\n    },\n    {\n      \"text\": \"terrible project managers\",\n      \"meaning_zh\": \"糟糕的项目经理（比喻情绪管理不好）\",\n      \"example\": \"Feelings make terrible project managers, so don't rely on them.\"\n    }\n  ],\n  \"grammar_points\": [\n    \"一般现在时\",\n    \"because 引导的原因状语从句\",\n    \"if 引导的条件状语从句\",\n    \"动名词作主语\"\n  ],\n  \"key_sentences\": [\n    {\n      \"text\": \"Your habits are not going to change because you feel motivated.\",\n      \"translation_zh\": \"你的习惯不会因为你感到有动力而改变。\"\n    },\n    {\n      \"text\": \"They change because you make them ridiculously easy.\",\n      \"translation_zh\": \"它们改变是因为你让它们变得极其简单。\"\n    },\n    {\n      \"text\": \"Motivation is a feeling, and feelings make terrible project managers.\",\n      \"translation_zh\": \"动力是一种感觉，而感觉是糟糕的项目经理。\"\n    }\n  ],\n  \"summary_zh\": \"这段视频强调微小的习惯比动力更能带来改变，建议把想做的事变得极其简单。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.4583,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 0.8571,
+        "hallucination": 0.8571,
+        "overall": 0.8443
+      }
+    },
+    {
+      "id": "daily-smalltalk-16",
+      "title": "Coffee shop small talk that sounds natural",
+      "category": "日常口语",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "日常口语",
+        "subtopic": "咖啡店寒暄与闲聊",
+        "cefr_level": "B1",
+        "accent": "英音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "small talk",
+          "week",
+          "busy",
+          "can't complain",
+          "grab a coffee",
+          "text",
+          "take care",
+          "see you around",
+          "honestly",
+          "anyway"
+        ],
+        "expressions": [
+          {
+            "text": "How's your week been?",
+            "meaning_zh": "你这周过得怎么样？",
+            "example": "How's your week been so far?"
+          },
+          {
+            "text": "Can't complain",
+            "meaning_zh": "没什么可抱怨的，还不错",
+            "example": "A: How are you? B: Can't complain."
+          },
+          {
+            "text": "Same here",
+            "meaning_zh": "我也一样",
+            "example": "A: I'm tired. B: Same here."
+          },
+          {
+            "text": "I should let you get on",
+            "meaning_zh": "我不耽误你了，你忙吧",
+            "example": "Anyway, I should let you get on with your work."
+          },
+          {
+            "text": "Let's grab a coffee sometime",
+            "meaning_zh": "我们改天一起喝杯咖啡吧",
+            "example": "Let's grab a coffee sometime next week."
+          },
+          {
+            "text": "See you around",
+            "meaning_zh": "回头见，再见",
+            "example": "Take care, see you around."
+          }
+        ],
+        "grammar_points": [
+          "现在完成时（How's your week been?）",
+          "省略句（Busy, but you know...）",
+          "情态动词 should 表建议（I should let you get on）",
+          "祈使句（Take care, see you around）"
+        ],
+        "key_sentences": [
+          {
+            "text": "So how's your week been?",
+            "translation_zh": "你这周过得怎么样？"
+          },
+          {
+            "text": "Busy, but you know, can't complain.",
+            "translation_zh": "忙，但你知道的，还不错。"
+          },
+          {
+            "text": "Anyway, I should let you get on.",
+            "translation_zh": "总之，我不耽误你了。"
+          },
+          {
+            "text": "Let's grab a coffee sometime next week.",
+            "translation_zh": "我们下周找个时间一起喝杯咖啡吧。"
+          },
+          {
+            "text": "Sounds good, I'll text you.",
+            "translation_zh": "听起来不错，我会发短信给你。"
+          }
+        ],
+        "summary_zh": "这段视频展示了咖啡店偶遇时自然的小聊用语，包括问候、回应、结束对话和约定下次见面，适合学习地道口语表达。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.11,
+      "raw_response": "{\n  \"topic\": \"日常口语\",\n  \"subtopic\": \"咖啡店寒暄与闲聊\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"英音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\"small talk\", \"week\", \"busy\", \"can't complain\", \"grab a coffee\", \"text\", \"take care\", \"see you around\", \"honestly\", \"anyway\"],\n  \"expressions\": [\n    {\"text\": \"How's your week been?\", \"meaning_zh\": \"你这周过得怎么样？\", \"example\": \"How's your week been so far?\"},\n    {\"text\": \"Can't complain\", \"meaning_zh\": \"没什么可抱怨的，还不错\", \"example\": \"A: How are you? B: Can't complain.\"},\n    {\"text\": \"Same here\", \"meaning_zh\": \"我也一样\", \"example\": \"A: I'm tired. B: Same here.\"},\n    {\"text\": \"I should let you get on\", \"meaning_zh\": \"我不耽误你了，你忙吧\", \"example\": \"Anyway, I should let you get on with your work.\"},\n    {\"text\": \"Let's grab a coffee sometime\", \"meaning_zh\": \"我们改天一起喝杯咖啡吧\", \"example\": \"Let's grab a coffee sometime next week.\"},\n    {\"text\": \"See you around\", \"meaning_zh\": \"回头见，再见\", \"example\": \"Take care, see you around.\"}\n  ],\n  \"grammar_points\": [\"现在完成时（How's your week been?）\", \"省略句（Busy, but you know...）\", \"情态动词 should 表建议（I should let you get on）\", \"祈使句（Take care, see you around）\"],\n  \"key_sentences\": [\n    {\"text\": \"So how's your week been?\", \"translation_zh\": \"你这周过得怎么样？\"},\n    {\"text\": \"Busy, but you know, can't complain.\", \"translation_zh\": \"忙，但你知道的，还不错。\"},\n    {\"text\": \"Anyway, I should let you get on.\", \"translation_zh\": \"总之，我不耽误你了。\"},\n    {\"text\": \"Let's grab a coffee sometime next week.\", \"translation_zh\": \"我们下周找个时间一起喝杯咖啡吧。\"},\n    {\"text\": \"Sounds good, I'll text you.\", \"translation_zh\": \"听起来不错，我会发短信给你。\"}\n  ],\n  \"summary_zh\": \"这段视频展示了咖啡店偶遇时自然的小聊用语，包括问候、回应、结束对话和约定下次见面，适合学习地道口语表达。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.7,
+        "grammar_quality": 0.2,
+        "key_sentence_quality": 0.888,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.8269
+      }
+    },
+    {
+      "id": "interview-honest-17",
+      "title": "Interview: what nobody says about success",
+      "category": "访谈",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "职场成长",
+        "subtopic": "成功的本质与坚持",
+        "cefr_level": "B2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "success",
+          "moment",
+          "mundane",
+          "unremarkable",
+          "quit",
+          "cumulative",
+          "overnight success",
+          "corollary",
+          "shortcut",
+          "work"
+        ],
+        "expressions": [
+          {
+            "text": "get wrong",
+            "meaning_zh": "误解；搞错",
+            "example": "People often get wrong what success really means."
+          },
+          {
+            "text": "overnight success",
+            "meaning_zh": "一夜成名；突然的成功",
+            "example": "His overnight success was actually the result of years of hard work."
+          },
+          {
+            "text": "cumulative effect",
+            "meaning_zh": "累积效应",
+            "example": "The cumulative effect of small daily habits can be life-changing."
+          },
+          {
+            "text": "uncomfortable corollary",
+            "meaning_zh": "令人不安的必然结果",
+            "example": "The uncomfortable corollary of freedom is responsibility."
+          }
+        ],
+        "grammar_points": [
+          "表语从句（is that...）",
+          "定语从句（in which...）",
+          "并列句（and 连接）"
+        ],
+        "key_sentences": [
+          {
+            "text": "I think the thing people get wrong about success is that they imagine it as a moment.",
+            "translation_zh": "我认为人们对成功的误解在于，他们把它想象成一个瞬间。"
+          },
+          {
+            "text": "In my experience it is far more mundane than that.",
+            "translation_zh": "根据我的经验，它远比那要平淡无奇。"
+          },
+          {
+            "text": "It is a series of unremarkable days in which you did not quit, and the cumulative effect of that, frankly, is what people later call overnight success.",
+            "translation_zh": "它是一连串你没有放弃的平凡日子，而坦率地说，这种累积效应就是人们后来所说的“一夜成名”。"
+          },
+          {
+            "text": "The uncomfortable corollary is that you cannot shortcut it.",
+            "translation_zh": "令人不安的必然结果是，你无法走捷径。"
+          },
+          {
+            "text": "There is no version of this where the work happens without you.",
+            "translation_zh": "在这件事上，没有哪种情况是工作会自己完成而不需要你参与的。"
+          }
+        ],
+        "summary_zh": "这段采访探讨了成功的真正含义，指出成功并非瞬间的辉煌，而是日复一日的坚持与积累，无法走捷径。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.21,
+      "raw_response": "{\n  \"topic\": \"职场成长\",\n  \"subtopic\": \"成功的本质与坚持\",\n  \"cefr_level\": \"B2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\n    \"success\",\n    \"moment\",\n    \"mundane\",\n    \"unremarkable\",\n    \"quit\",\n    \"cumulative\",\n    \"overnight success\",\n    \"corollary\",\n    \"shortcut\",\n    \"work\"\n  ],\n  \"expressions\": [\n    {\n      \"text\": \"get wrong\",\n      \"meaning_zh\": \"误解；搞错\",\n      \"example\": \"People often get wrong what success really means.\"\n    },\n    {\n      \"text\": \"overnight success\",\n      \"meaning_zh\": \"一夜成名；突然的成功\",\n      \"example\": \"His overnight success was actually the result of years of hard work.\"\n    },\n    {\n      \"text\": \"cumulative effect\",\n      \"meaning_zh\": \"累积效应\",\n      \"example\": \"The cumulative effect of small daily habits can be life-changing.\"\n    },\n    {\n      \"text\": \"uncomfortable corollary\",\n      \"meaning_zh\": \"令人不安的必然结果\",\n      \"example\": \"The uncomfortable corollary of freedom is responsibility.\"\n    }\n  ],\n  \"grammar_points\": [\n    \"表语从句（is that...）\",\n    \"定语从句（in which...）\",\n    \"并列句（and 连接）\"\n  ],\n  \"key_sentences\": [\n    {\n      \"text\": \"I think the thing people get wrong about success is that they imagine it as a moment.\",\n      \"translation_zh\": \"我认为人们对成功的误解在于，他们把它想象成一个瞬间。\"\n    },\n    {\n      \"text\": \"In my experience it is far more mundane than that.\",\n      \"translation_zh\": \"根据我的经验，它远比那要平淡无奇。\"\n    },\n    {\n      \"text\": \"It is a series of unremarkable days in which you did not quit, and the cumulative effect of that, frankly, is what people later call overnight success.\",\n      \"translation_zh\": \"它是一连串你没有放弃的平凡日子，而坦率地说，这种累积效应就是人们后来所说的“一夜成名”。\"\n    },\n    {\n      \"text\": \"The uncomfortable corollary is that you cannot shortcut it.\",\n      \"translation_zh\": \"令人不安的必然结果是，你无法走捷径。\"\n    },\n    {\n      \"text\": \"There is no version of this where the work happens without you.\",\n      \"translation_zh\": \"在这件事上，没有哪种情况是工作会自己完成而不需要你参与的。\"\n    }\n  ],\n  \"summary_zh\": \"这段采访探讨了成功的真正含义，指出成功并非瞬间的辉煌，而是日复一日的坚持与积累，无法走捷径。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.65,
+        "grammar_quality": 1.0,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 1.0,
+        "overall": 0.95
+      }
+    },
+    {
+      "id": "tutorial-english-learning-18",
+      "title": "Why you should learn English with stories",
+      "category": "教程",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "英语学习",
+        "subtopic": "用故事记单词的方法",
+        "cefr_level": "B1",
+        "accent": "英音",
+        "speech_speed": "中等",
+        "learning_value": 0.9,
+        "keywords": [
+          "vocabulary",
+          "memorise",
+          "brain",
+          "meaning",
+          "homework",
+          "students",
+          "read",
+          "love",
+          "tolerate",
+          "story"
+        ],
+        "expressions": [
+          {
+            "text": "Here is the thing about",
+            "meaning_zh": "关于……有一点要说",
+            "example": "Here is the thing about learning a language: consistency matters more than talent."
+          },
+          {
+            "text": "file something under",
+            "meaning_zh": "把……归入（某类别）",
+            "example": "I file these notes under 'important' so I can find them later."
+          },
+          {
+            "text": "rather than",
+            "meaning_zh": "而不是",
+            "example": "I prefer to walk rather than take the bus."
+          },
+          {
+            "text": "tolerate",
+            "meaning_zh": "忍受，勉强接受",
+            "example": "She can't tolerate the noise from the construction site."
+          },
+          {
+            "text": "care about",
+            "meaning_zh": "关心，在意",
+            "example": "He only reads books he really cares about."
+          }
+        ],
+        "grammar_points": [
+          "一般现在时",
+          "if 引导的条件状语从句",
+          "rather than 的用法",
+          "why 引导的表语从句"
+        ],
+        "key_sentences": [
+          {
+            "text": "Here is the thing about vocabulary lists.",
+            "translation_zh": "关于单词表，有一点要说。"
+          },
+          {
+            "text": "You memorise fifty words, and by Friday you remember maybe six of them.",
+            "translation_zh": "你背了五十个单词，到了周五可能只记得其中六个。"
+          },
+          {
+            "text": "But if those same fifty words appear inside a story you actually care about, your brain files them under meaning instead of under homework.",
+            "translation_zh": "但如果同样的五十个单词出现在你真正在意的故事里，你的大脑会把它们归入“意义”而不是“作业”。"
+          },
+          {
+            "text": "That is why I always tell my students to read one page they love rather than ten pages they tolerate.",
+            "translation_zh": "这就是为什么我总是告诉我的学生，读一页他们喜欢的，而不是十页他们勉强忍受的。"
+          }
+        ],
+        "summary_zh": "这段视频解释了为什么通过故事学习英语比死记单词表更有效，并建议阅读自己真正喜欢的内容。",
+        "recommended_task": "影子跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.39,
+      "raw_response": "{\n  \"topic\": \"英语学习\",\n  \"subtopic\": \"用故事记单词的方法\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"英音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.9,\n  \"keywords\": [\"vocabulary\", \"memorise\", \"brain\", \"meaning\", \"homework\", \"students\", \"read\", \"love\", \"tolerate\", \"story\"],\n  \"expressions\": [\n    {\"text\": \"Here is the thing about\", \"meaning_zh\": \"关于……有一点要说\", \"example\": \"Here is the thing about learning a language: consistency matters more than talent.\"},\n    {\"text\": \"file something under\", \"meaning_zh\": \"把……归入（某类别）\", \"example\": \"I file these notes under 'important' so I can find them later.\"},\n    {\"text\": \"rather than\", \"meaning_zh\": \"而不是\", \"example\": \"I prefer to walk rather than take the bus.\"},\n    {\"text\": \"tolerate\", \"meaning_zh\": \"忍受，勉强接受\", \"example\": \"She can't tolerate the noise from the construction site.\"},\n    {\"text\": \"care about\", \"meaning_zh\": \"关心，在意\", \"example\": \"He only reads books he really cares about.\"}\n  ],\n  \"grammar_points\": [\"一般现在时\", \"if 引导的条件状语从句\", \"rather than 的用法\", \"why 引导的表语从句\"],\n  \"key_sentences\": [\n    {\"text\": \"Here is the thing about vocabulary lists.\", \"translation_zh\": \"关于单词表，有一点要说。\"},\n    {\"text\": \"You memorise fifty words, and by Friday you remember maybe six of them.\", \"translation_zh\": \"你背了五十个单词，到了周五可能只记得其中六个。\"},\n    {\"text\": \"But if those same fifty words appear inside a story you actually care about, your brain files them under meaning instead of under homework.\", \"translation_zh\": \"但如果同样的五十个单词出现在你真正在意的故事里，你的大脑会把它们归入“意义”而不是“作业”。\"},\n    {\"text\": \"That is why I always tell my students to read one page they love rather than ten pages they tolerate.\", \"translation_zh\": \"这就是为什么我总是告诉我的学生，读一页他们喜欢的，而不是十页他们勉强忍受的。\"}\n  ],\n  \"summary_zh\": \"这段视频解释了为什么通过故事学习英语比死记单词表更有效，并建议阅读自己真正喜欢的内容。\",\n  \"recommended_task\": \"影子跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.26,
+        "grammar_quality": 0.7375,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 1.0,
+        "hallucination": 0.8889,
+        "overall": 0.8409
+      }
+    },
+    {
+      "id": "tutorial-photo-lighting-19",
+      "title": "Phone photography: fix your lighting first",
+      "category": "教程",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "生活技巧",
+        "subtopic": "手机摄影与光线运用",
+        "cefr_level": "B1",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.85,
+        "keywords": [
+          "lens",
+          "lighting",
+          "window",
+          "indoors",
+          "harsh",
+          "diffuse",
+          "curtain",
+          "flash",
+          "flattens",
+          "plastic"
+        ],
+        "expressions": [
+          {
+            "text": "fix your lighting",
+            "meaning_zh": "调整/改善你的光线",
+            "example": "Before you buy a new camera, fix your lighting."
+          },
+          {
+            "text": "you are already ahead of",
+            "meaning_zh": "你已经领先于……",
+            "example": "If you practice daily, you are already ahead of most learners."
+          },
+          {
+            "text": "move a step back",
+            "meaning_zh": "后退一步",
+            "example": "If the photo is too close, move a step back."
+          },
+          {
+            "text": "diffuse it with",
+            "meaning_zh": "用……使光线变柔和",
+            "example": "You can diffuse harsh sunlight with a white curtain."
+          },
+          {
+            "text": "flattens everything",
+            "meaning_zh": "使一切变得扁平/缺乏立体感",
+            "example": "Using flash flattens everything and ruins the mood."
+          },
+          {
+            "text": "makes skin look plastic",
+            "meaning_zh": "让皮肤看起来像塑料",
+            "example": "Too much editing makes skin look plastic."
+          }
+        ],
+        "grammar_points": [
+          "祈使句",
+          "条件状语从句（if...）",
+          "现在进行时",
+          "动词短语（fix, move, diffuse, stop）"
+        ],
+        "key_sentences": [
+          {
+            "text": "Before you buy another lens, fix your lighting.",
+            "translation_zh": "在你买另一个镜头之前，先调整好你的光线。"
+          },
+          {
+            "text": "Stand facing a window, and you are already ahead of ninety percent of people shooting indoors.",
+            "translation_zh": "面对窗户站立，你就已经领先于百分之九十在室内拍摄的人了。"
+          },
+          {
+            "text": "If the light is harsh, move a step back or diffuse it with a white curtain.",
+            "translation_zh": "如果光线太刺眼，后退一步，或者用白色窗帘使它变柔和。"
+          },
+          {
+            "text": "And please stop using the flash.",
+            "translation_zh": "并且请停止使用闪光灯。"
+          },
+          {
+            "text": "It flattens everything and makes skin look plastic.",
+            "translation_zh": "它会让一切变得扁平，让皮肤看起来像塑料。"
+          }
+        ],
+        "summary_zh": "这段视频介绍了手机摄影中光线的基础技巧：面对窗户、避免强光、用白色窗帘柔化光线，并建议不要使用闪光灯。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 3.14,
+      "raw_response": "{\n  \"topic\": \"生活技巧\",\n  \"subtopic\": \"手机摄影与光线运用\",\n  \"cefr_level\": \"B1\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.85,\n  \"keywords\": [\"lens\", \"lighting\", \"window\", \"indoors\", \"harsh\", \"diffuse\", \"curtain\", \"flash\", \"flattens\", \"plastic\"],\n  \"expressions\": [\n    {\"text\": \"fix your lighting\", \"meaning_zh\": \"调整/改善你的光线\", \"example\": \"Before you buy a new camera, fix your lighting.\"},\n    {\"text\": \"you are already ahead of\", \"meaning_zh\": \"你已经领先于……\", \"example\": \"If you practice daily, you are already ahead of most learners.\"},\n    {\"text\": \"move a step back\", \"meaning_zh\": \"后退一步\", \"example\": \"If the photo is too close, move a step back.\"},\n    {\"text\": \"diffuse it with\", \"meaning_zh\": \"用……使光线变柔和\", \"example\": \"You can diffuse harsh sunlight with a white curtain.\"},\n    {\"text\": \"flattens everything\", \"meaning_zh\": \"使一切变得扁平/缺乏立体感\", \"example\": \"Using flash flattens everything and ruins the mood.\"},\n    {\"text\": \"makes skin look plastic\", \"meaning_zh\": \"让皮肤看起来像塑料\", \"example\": \"Too much editing makes skin look plastic.\"}\n  ],\n  \"grammar_points\": [\"祈使句\", \"条件状语从句（if...）\", \"现在进行时\", \"动词短语（fix, move, diffuse, stop）\"],\n  \"key_sentences\": [\n    {\"text\": \"Before you buy another lens, fix your lighting.\", \"translation_zh\": \"在你买另一个镜头之前，先调整好你的光线。\"},\n    {\"text\": \"Stand facing a window, and you are already ahead of ninety percent of people shooting indoors.\", \"translation_zh\": \"面对窗户站立，你就已经领先于百分之九十在室内拍摄的人了。\"},\n    {\"text\": \"If the light is harsh, move a step back or diffuse it with a white curtain.\", \"translation_zh\": \"如果光线太刺眼，后退一步，或者用白色窗帘使它变柔和。\"},\n    {\"text\": \"And please stop using the flash.\", \"translation_zh\": \"并且请停止使用闪光灯。\"},\n    {\"text\": \"It flattens everything and makes skin look plastic.\", \"translation_zh\": \"它会让一切变得扁平，让皮肤看起来像塑料。\"}\n  ],\n  \"summary_zh\": \"这段视频介绍了手机摄影中光线的基础技巧：面对窗户、避免强光、用白色窗帘柔化光线，并建议不要使用闪光灯。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 0.5,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.9,
+        "grammar_quality": 0.2,
+        "key_sentence_quality": 1.0,
+        "learning_value_quality": 0.8571,
+        "hallucination": 1.0,
+        "overall": 0.7796
+      }
+    },
+    {
+      "id": "daily-lowinfo-20",
+      "title": "POV: your Monday morning",
+      "category": "日常口语",
+      "version": "ai-enrichment-v1",
+      "result": {
+        "topic": "生活日常",
+        "subtopic": "周一早晨的疲惫感",
+        "cefr_level": "A2",
+        "accent": "美音",
+        "speech_speed": "中等",
+        "learning_value": 0.4,
+        "keywords": [
+          "Monday",
+          "tired",
+          "relatable",
+          "POV",
+          "skit",
+          "basically",
+          "feel",
+          "same"
+        ],
+        "expressions": [
+          {
+            "text": "POV",
+            "meaning_zh": "视角，观点（Point of View 的缩写）",
+            "example": "POV: you just woke up."
+          },
+          {
+            "text": "basically",
+            "meaning_zh": "基本上，大致上",
+            "example": "Basically, I'm just tired."
+          },
+          {
+            "text": "That is it.",
+            "meaning_zh": "就这样，没别的了。",
+            "example": "I studied all day. That is it."
+          },
+          {
+            "text": "feel the same way",
+            "meaning_zh": "有同感，感觉一样",
+            "example": "I feel the same way about Mondays."
+          }
+        ],
+        "grammar_points": [
+          "一般现在时",
+          "省略句",
+          "条件状语从句"
+        ],
+        "key_sentences": [
+          {
+            "text": "Okay so basically, yeah, it is Monday.",
+            "translation_zh": "好吧，基本上，是的，今天是星期一。"
+          },
+          {
+            "text": "I am tired.",
+            "translation_zh": "我累了。"
+          },
+          {
+            "text": "That is it. That is the video.",
+            "translation_zh": "就这样。这就是视频。"
+          },
+          {
+            "text": "If you feel the same way, yeah, same.",
+            "translation_zh": "如果你也有同感，是的，我也是。"
+          }
+        ],
+        "summary_zh": "这段视频以幽默自嘲的方式表达了周一早晨的疲惫感，语言简单直接，适合初学者学习日常口语表达。",
+        "recommended_task": "跟读"
+      },
+      "attempts": 1,
+      "elapsed": 2.64,
+      "raw_response": "{\n  \"topic\": \"生活日常\",\n  \"subtopic\": \"周一早晨的疲惫感\",\n  \"cefr_level\": \"A2\",\n  \"accent\": \"美音\",\n  \"speech_speed\": \"中等\",\n  \"learning_value\": 0.4,\n  \"keywords\": [\"Monday\", \"tired\", \"relatable\", \"POV\", \"skit\", \"basically\", \"feel\", \"same\"],\n  \"expressions\": [\n    {\"text\": \"POV\", \"meaning_zh\": \"视角，观点（Point of View 的缩写）\", \"example\": \"POV: you just woke up.\"},\n    {\"text\": \"basically\", \"meaning_zh\": \"基本上，大致上\", \"example\": \"Basically, I'm just tired.\"},\n    {\"text\": \"That is it.\", \"meaning_zh\": \"就这样，没别的了。\", \"example\": \"I studied all day. That is it.\"},\n    {\"text\": \"feel the same way\", \"meaning_zh\": \"有同感，感觉一样\", \"example\": \"I feel the same way about Mondays.\"}\n  ],\n  \"grammar_points\": [\"一般现在时\", \"省略句\", \"条件状语从句\"],\n  \"key_sentences\": [\n    {\"text\": \"Okay so basically, yeah, it is Monday.\", \"translation_zh\": \"好吧，基本上，是的，今天是星期一。\"},\n    {\"text\": \"I am tired.\", \"translation_zh\": \"我累了。\"},\n    {\"text\": \"That is it. That is the video.\", \"translation_zh\": \"就这样。这就是视频。\"},\n    {\"text\": \"If you feel the same way, yeah, same.\", \"translation_zh\": \"如果你也有同感，是的，我也是。\"}\n  ],\n  \"summary_zh\": \"这段视频以幽默自嘲的方式表达了周一早晨的疲惫感，语言简单直接，适合初学者学习日常口语表达。\",\n  \"recommended_task\": \"跟读\"\n}",
+      "scores": {
+        "topic_accuracy": 1.0,
+        "cefr_quality": 1.0,
+        "expression_quality": 0.0,
+        "grammar_quality": 0.2667,
+        "key_sentence_quality": 0.9125,
+        "learning_value_quality": 0.8571,
+        "hallucination": 0.875,
+        "overall": 0.7016
+      }
+    }
+  ]
+}

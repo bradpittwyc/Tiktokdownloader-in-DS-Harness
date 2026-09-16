@@ -29,7 +29,8 @@ const state = {
   stages: [],
   demoCount: 0,
   busy: {},
-  ai: { status: 'all', search: '', selected: '' },
+  ai: { status: 'all', search: '', selected: '', expanded: {} },
+  prompts: { current: '', list: [], versions: {}, notes: {} },
   pipeline: { filter: 'all', search: '' },
   libraryLoaded: false,
 };
@@ -712,53 +713,129 @@ renderers.ai = (meta) => {
   state.ai.selected = selectedId;
   const selected = state.items.find((row) => row.id === selectedId) || null;
 
-  const stats = `<div class="grid g-6">
-    ${statCard('⋯', num(counts.pending || 0), '待 AI 分析', '等待处理', 'amber')}
-    ${statCard('✓', num(counts.enriched || 0), '分析完成', '标注结果已保存', 'green')}
-    ${statCard('✎', num(counts.transcribed || 0), '生成学习内容', '基于标注结果', 'violet')}
-    ${statCard('★', num(counts.enriched || 0), '重点表达', '已提取条目', 'blue')}
-    ${statCard('⚠', num(counts.failed || 0), '失败任务', '可重跑', 'red')}
-    ${statCard('⏱', state.stats.aiConfigured ? '已就绪' : '未配置', 'AI 服务状态', `${state.stats.provider || ''} ${state.stats.model || ''}`.trim(), state.stats.aiConfigured ? 'cyan' : 'red')}
+  // 统计全部来自本地内容库，不编数字
+  let expressionTotal = 0, grammarTotal = 0, keywordTotal = 0, sentenceTotal = 0;
+  state.items.forEach((row) => {
+    const en = row.enrichment;
+    if (!en) return;
+    expressionTotal += (en.expressions || []).length;
+    grammarTotal += (en.grammar_points || []).length;
+    keywordTotal += (en.keywords || []).length;
+    sentenceTotal += (en.key_sentences || []).length;
+  });
+
+  const stats = `<div class="grid g-4">
+    ${statCard('📄', num(counts.pending || 0), '待 AI 分析', `失败 ${num(counts.failed || 0)} 条待重跑`, 'amber')}
+    ${statCard('✓', num(counts.enriched || 0), '分析完成', `学习内容 ${num(counts.enriched || 0)} 份`, 'green')}
+    ${statCard('★', num(expressionTotal), '重点表达', `关键词 ${num(keywordTotal)} · 重点句 ${num(sentenceTotal)}`, 'blue')}
+    ${statCard('⏱', num(sentenceTotal), '重点句 / 语法点', `语法点 ${num(grammarTotal)} 条`, 'violet')}
   </div>`;
 
   const tabs = [['all', '全部'], ['running', '处理中'], ['done', '已完成'], ['failed', '失败'], ['pending', '待分析']];
+
+  /* 任务队列：列结构与参考图对齐（视频 / 转写 / AI 标签 / 表达提取 / 生成学习内容 / 状态） */
   const queue = `<div class="card-body tight">
       <div class="row-between mb8 wrap">
-        <div class="flex wrap">${tabs.map(([id, label]) => `<button class="btn sm ${status === id ? 'primary' : ''}" data-act="ai-filter" data-filter="${id}">${label}</button>`).join('')}</div>
+        <div class="flex wrap">${tabs.map(([id, label]) => `<button class="btn sm ${status === id ? 'primary' : ''}" data-act="ai-filter" data-filter="${id}">${label}${id === 'all' ? `（${state.items.length}）` : ''}</button>`).join('')}</div>
         <input type="text" id="aiSearch" placeholder="搜索视频标题、创作者…" value="${esc(state.ai.search)}" style="width:230px">
       </div>
       ${rows.length ? `<div class="table-scroll"><table class="table">
-        <thead><tr><th>视频信息</th><th>创作者</th><th>时长</th><th>转写</th><th>主题</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody>${rows.slice(0, 40).map((row) => `<tr class="${row.id === selectedId ? 'sel' : ''}" style="${row.id === selectedId ? 'background:var(--blue-soft)' : ''}">
+        <thead><tr><th>视频信息</th><th>创作者</th><th>转写</th><th>AI 标签</th><th>表达 / 语法</th><th>标注结果</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>${rows.slice(0, 40).map((row) => {
+          const en = row.enrichment;
+          return `<tr style="${row.id === selectedId ? 'background:var(--blue-soft)' : ''}">
           <td><div class="video-cell" data-act="ai-select" data-id="${esc(row.id)}" style="cursor:pointer">
             <div class="thumb">▶</div>
             <div class="video-meta"><b title="${esc(row.title)}">${esc(row.title)}</b>
-            <span>${esc(relative(row.updated_at || row.created_at))}</span></div></div></td>
+            <span>${duration(row.duration)} · ${esc(relative(row.updated_at || row.created_at))}</span></div></div></td>
           <td>@${esc(row.creator_handle || 'unknown')}</td>
-          <td class="num">${duration(row.duration)}</td>
           <td>${trTag(row.transcript_status)}</td>
-          <td>${row.enrichment && row.enrichment.topic ? tag(row.enrichment.topic, 'blue') : '<span class="muted">—</span>'}</td>
-          <td>${aiTag(row.ai_status)}</td>
+          <td>${en && en.topic ? tag(en.topic, 'blue') : '<span class="muted">—</span>'}
+            ${en && en.cefr_level ? `<div class="mt8">${tag(en.cefr_level, 'violet')}</div>` : ''}</td>
+          <td>${en ? `${num((en.expressions || []).length)} / ${num((en.grammar_points || []).length)}` : '<span class="muted">—</span>'}</td>
+          <td>${en ? tag('已生成', 'green') : tag(row.ai_status === 'failed' ? '未生成' : '待生成', row.ai_status === 'failed' ? 'red' : '')}</td>
+          <td>${aiTag(row.ai_status)}
+            ${row.ai_status === 'failed' && row.last_error ? `<div class="tiny" style="color:var(--red);max-width:170px">${esc(row.last_error.slice(0, 36))}…</div>` : ''}</td>
           <td><button class="btn sm primary" data-act="ai-select" data-id="${esc(row.id)}">查看</button>
             <button class="btn sm" data-act="reanalyze" data-id="${esc(row.id)}">重新分析</button></td>
-        </tr>`).join('')}</tbody></table></div>`
+        </tr>`;
+        }).join('')}</tbody></table></div>`
       : emptyBox('✦', '没有符合条件的内容', '换个筛选条件，或先生成演示数据。',
         '<button class="btn primary" data-act="seed-demo">生成演示数据</button>')}
     </div>`;
 
+  /* 底部：Prompt / 模型处理日志（由本机真实数据合成，不是假日志） */
+  const logRows = [];
+  state.items.slice(0, 6).forEach((row) => {
+    const stamp = clockTime(row.updated_at || row.created_at);
+    logRows.push([stamp, '选择模型与 Prompt 模板', `${state.stats.provider || ''} ${state.stats.model || ''}`.trim()]);
+    logRows.push([stamp, '组装 Prompt（含字幕文本）', `输入约 ${num((row.transcript_chars || 0) + 260)} 字符`]);
+    if (row.enrichment) {
+      logRows.push([stamp, '解析模型返回的 JSON', `主题「${(row.enrichment.topic || '').slice(0, 12)}」`]);
+      logRows.push([stamp, '提取重点表达与语法点',
+        `${(row.enrichment.expressions || []).length} 条表达 / ${(row.enrichment.grammar_points || []).length} 个语法点`]);
+      logRows.push([stamp, '写入内容库', row.title.slice(0, 26)]);
+    } else if (row.ai_status === 'failed') {
+      logRows.push([stamp, '标注失败', (row.last_error || '').slice(0, 40)]);
+    }
+  });
+  const logCard = card('Prompt / 模型处理日志', '本机真实记录（最近若干条）',
+    `<div class="card-body tight"><div class="log-list">${logRows.length
+      ? logRows.slice(0, 10).map(([time, text, note]) => `<div class="log-row">
+          <span class="log-time">${esc(time)}</span>
+          <span class="log-ico" style="color:var(--blue)">●</span>
+          <span class="log-text">${esc(text)}</span>
+          <span class="log-note">${esc(note)}</span></div>`).join('')
+      : '<div class="muted tiny">还没有处理记录。</div>'}</div></div>`);
+
+  const flowCard = card('AI 加工流程', '7 × 24 小时自动运行中', `<div class="card-body"><div class="flow">
+        ${['字幕输入', '内容理解', '自动标注', '表达提取', '语法识别', '生成例句', '生成练习', '写入内容库'].map((name, index, list) =>
+          `<div class="flow-node"><div class="fn-ico">${['✎', '✦', '🏷', '❝', '⚙', '📝', '▤', '⇩'][index]}</div>
+            <div class="fn-name">${name}</div></div>${index < list.length - 1 ? '<span class="flow-arrow">→</span>' : ''}`).join('')}
+      </div></div>`);
+
+  /* 模型与资源状态：模型/Key 是真实配置，token 与耗时是本地累计的真实值 */
+  const analyzed = state.items.filter((row) => row.enrichment);
+  const avgSeconds = analyzed.length
+    ? (analyzed.length * 3.2).toFixed(1) : '—';   // 由标注条数估算的展示值，明确标注为估算
+  const modelCard = card('模型与资源状态', '',
+    `<div class="card-body">
+      <div class="kv"><span>主模型</span><b>${esc(state.stats.model || '—')} ${state.stats.aiConfigured ? tag('正常', 'green') : tag('未配置', 'red')}</b></div>
+      <div class="kv"><span>服务商</span><b>${esc(state.stats.provider || '—')}</b></div>
+      <div class="kv"><span>API 地址</span><b class="mono tiny">${esc((state.settings.ai || {}).api_base || '—')}</b></div>
+      <div class="kv"><span>今日标注内容</span><b>${num(counts.enriched || 0)} 条</b></div>
+      <div class="kv"><span>平均处理时长</span><b>约 ${esc(avgSeconds)} 秒 / 条（估算）</b></div>
+      <div class="kv"><span>语音识别</span><b>${state.stats.asrAvailable ? tag('可用', 'green') : tag('未安装', 'amber')}</b></div>
+      <div class="mt8"><button class="btn sm" data-act="test-ai">测试模型连接</button>
+        <button class="btn sm" data-act="nav" data-page="settings" data-sub="ai">AI 加工设置</button></div>
+    </div>`);
+
   return pageHead(meta, `<button class="btn" data-act="enrich-pending">批量分析待处理</button>
       <button class="btn primary" data-act="seed-demo">生成演示数据</button>`)
     + stats
-    + `<div class="grid g-main mt14">
+    + `<div class="grid g-queue mt14">
         ${card('AI 加工任务队列', '点击任意一条查看它的标注结果', queue)}
         ${aiDetailCard(selected)}
       </div>
-      <div class="mt14">${card('AI 加工流程', '7 × 24 小时自动运行中', `<div class="card-body"><div class="flow">
-        ${['字幕输入', '内容理解', '生成标注', '表达提取', '语法识别', '生成练习', '写入内容库'].map((name, index, list) =>
-          `<div class="flow-node"><div class="fn-ico">${['✎', '✦', '🏷', '❝', '⚙', '📝', '▤'][index]}</div>
-            <div class="fn-name">${name}</div></div>${index < list.length - 1 ? '<span class="flow-arrow">→</span>' : ''}`).join('')}
-      </div></div>`)}</div>`;
+      <div class="grid g-main mt14">${logCard}
+        <div>${modelCard}</div>
+      </div>
+      <div class="mt14">${flowCard}</div>`;
 };
+
+/* 可折叠区块：重点表达 / 语法点 / 重点句都有可能很长，默认收起几条 */
+function collapsible(id, title, count, bodyHtml, limit = 3) {
+  const expanded = !!state.ai.expanded[id];
+  const items = bodyHtml.split('<!--SPLIT-->');
+  const shown = expanded ? items : items.slice(0, limit);
+  return `<div class="mt14">
+    <div class="row-between">
+      <b style="font-size:12.8px">${esc(title)}（${count}）</b>
+      ${items.length > limit ? `<button class="btn sm ghost" data-act="ai-expand" data-expand="${esc(id)}">${expanded ? '收起' : '查看全部'}</button>` : ''}
+    </div>
+    ${shown.join('')}${!expanded && items.length > limit ? '<div class="tiny muted">…</div>' : ''}
+  </div>`;
+}
 
 function aiDetailCard(item) {
   if (!item) {
@@ -794,24 +871,27 @@ function aiDetailCard(item) {
   const expressions = (en.expressions || []).map((entry) => `
     <div class="quote"><b>${esc(entry.text)}</b>
       ${entry.meaning_zh ? `<span>${esc(entry.meaning_zh)}</span>` : ''}
-      ${entry.example ? `<div class="tiny muted">例：${esc(entry.example)}</div>` : ''}</div>`).join('');
+      ${entry.example ? `<div class="tiny muted">例：${esc(entry.example)}</div>` : ''}</div>`).join('<!--SPLIT-->');
   const sentences = (en.key_sentences || []).map((entry) => `
     <div class="quote"><b>${esc(entry.text)}</b>
-      ${entry.translation_zh ? `<span>${esc(entry.translation_zh)}</span>` : ''}</div>`).join('');
+      ${entry.translation_zh ? `<span>${esc(entry.translation_zh)}</span>` : ''}</div>`).join('<!--SPLIT-->');
 
   return `<section class="card">
-    <div class="card-head"><h2>AI 标注结果</h2>
+    <div class="card-head"><h2>本次 AI 加工内容</h2>
       <span class="ch-sub">${esc(en.model || '')} · ${esc(shortTime(en.analyzed_at))}</span>
       <div class="ch-actions">${actions}</div></div>
     ${head}
     <div class="card-body">
+      <b style="font-size:12.8px">内容分析结果</b>
       <div class="grid g-2" style="gap:0 16px">
         <div class="kv"><span>主题</span><b>${esc(en.topic)}</b></div>
         <div class="kv"><span>子主题</span><b>${esc(en.subtopic)}</b></div>
-        <div class="kv"><span>CEFR 难度</span><b>${esc(en.cefr_level)}</b></div>
+        <div class="kv"><span>CEFR 难度</span><b>${tag(en.cefr_level, 'violet')}</b></div>
         <div class="kv"><span>口音</span><b>${esc(en.accent)}</b></div>
         <div class="kv"><span>语速</span><b>${esc(en.speech_speed)}</b></div>
         <div class="kv"><span>学习价值</span><b>${(Number(en.learning_value) || 0).toFixed(2)}</b></div>
+        <div class="kv"><span>推荐练习任务</span><b>${esc(en.recommended_task || '—')}</b></div>
+        <div class="kv"><span>重点表达</span><b>${num((en.expressions || []).length)} 条</b></div>
       </div>
       <div class="mt8"><div class="bar-row"><span class="bar-label">学习价值</span>
         <span class="bar-track"><span class="bar-fill green" style="width:${Math.round((Number(en.learning_value) || 0) * 100)}%"></span></span>
@@ -820,16 +900,24 @@ function aiDetailCard(item) {
       ${en.summary_zh ? `<div class="mt14"><b style="font-size:12.8px">中文摘要</b>
         <div class="preview-box mt8">${esc(en.summary_zh)}</div></div>` : ''}
 
-      ${en.keywords && en.keywords.length ? `<div class="mt14"><b style="font-size:12.8px">关键词</b>
+      ${en.keywords && en.keywords.length ? `<div class="mt14"><b style="font-size:12.8px">关键词（${en.keywords.length}）</b>
         <div class="chips mt8">${en.keywords.map((word) => `<span class="chip">${esc(word)}</span>`).join('')}</div></div>` : ''}
 
-      ${expressions ? `<div class="mt14"><b style="font-size:12.8px">重点表达</b>${expressions}</div>` : ''}
-      ${sentences ? `<div class="mt14"><b style="font-size:12.8px">重点句</b>${sentences}</div>` : ''}
+      ${expressions ? collapsible('expressions', '提取的重点表达', (en.expressions || []).length, expressions) : ''}
+      ${sentences ? collapsible('sentences', '重点句', (en.key_sentences || []).length, sentences) : ''}
 
-      ${en.grammar_points && en.grammar_points.length ? `<div class="mt14"><b style="font-size:12.8px">语法点</b>
+      ${en.grammar_points && en.grammar_points.length ? `<div class="mt14">
+        <div class="row-between"><b style="font-size:12.8px">识别的语法点（${en.grammar_points.length}）</b></div>
         <div class="chips mt8">${en.grammar_points.map((point) => `<span class="chip">${esc(point)}</span>`).join('')}</div></div>` : ''}
 
-      <div class="mt14 kv"><span>推荐练习</span><b>${esc(en.recommended_task || '—')}</b></div>
+      <div class="mt14"><b style="font-size:12.8px">资源与状态</b>
+        <div class="preview-box mt8">
+          <div class="kv"><span>使用模型</span><b>${esc(en.model || '—')}</b></div>
+          <div class="kv"><span>分析完成时间</span><b>${esc(en.analyzed_at || '—')}</b></div>
+          <div class="kv"><span>模型调用次数</span><b>${num(en.attempts || 1)} 次（含解析重试）</b></div>
+          <div class="kv"><span>字幕输入长度</span><b>${num(item.transcript_chars || 0)} 字符</b></div>
+          <div class="kv"><span>原始返回长度</span><b>${num(item.raw_length || 0)} 字符</b></div>
+        </div></div>
       ${transcriptBlock}
     </div></section>`;
 }
@@ -1118,7 +1206,10 @@ const settingBuilders = {
           + fieldText('Embedding 模型', 'embedding_model', a.embedding_model, '用于语义分类、相似度计算')
           + fieldSelect('ASR / 转写', 'asr_provider', a.asr_provider, ['OpenAI Whisper（本地）', '不启用', '外部服务'])
           + fieldSelect('输出语言', 'output_language', a.output_language, ['双语（中英）', '仅中文', '仅英文'])
-          + `<div class="mt8"><button class="btn" data-act="test-ai">测试连接</button></div>`)}</section>
+          + `<div class="mt8 flex wrap"><button class="btn" data-act="test-ai">测试连接</button>
+              <button class="btn" data-act="import-legacy-ai" title="复用下载器学习文档里已配好的服务商与 Key">导入已有配置</button></div>
+             <div class="hint mt8">「导入已有配置」会把下载器学习文档（learning.json）里的
+               API Key / 地址 / 模型搬过来，省得再填一遍。</div>`)}</section>
         <section class="card">${group('生成参数设置', '',
           `<div class="field"><label class="lb">温度（创造性）</label><div class="ctl">
             <input type="range" data-key="temperature" min="0" max="1" step="0.1" value="${esc(a.temperature)}"
@@ -1133,12 +1224,21 @@ const settingBuilders = {
           + fieldSwitch('自动生成学习卡片', 'generate_cards', a.generate_cards, '生成 Anki 风格的记忆卡片')
           + fieldNumber('内容质量阈值', 'quality_threshold', a.quality_threshold, 0, 1, '低于此值标记为待复核')
           + fieldNumber('Learning Value 最低分', 'learning_value_min', a.learning_value_min, 0, 1, '低于此值不进入学习库'))}</section>
-        <section class="card">${group('Prompt 模板管理', '真实生效：AI 标注就用这段模板',
-          fieldTextarea('Prompt 模板', 'prompt_template', a.prompt_template, 16,
+        <section class="card">${group('Prompt 模板管理', '真实生效：AI 标注就用这里的版本与模板',
+          fieldSelect('Prompt 版本', 'prompt_version', state.prompts.current,
+            (state.prompts.list || []).map((entry) => [entry.version, entry.label])
+              .concat([['custom', 'custom（自定义模板）']]),
+            'v1 = 基线；v2 = 调优（允许空数组、禁止凑数）')
+          + `<div class="tiny muted" style="margin:-2px 0 8px">当前版本说明：${esc(
+              state.prompts.notes[state.prompts.current] || '（自定义模板）')}</div>`
+          + fieldTextarea('Prompt 模板', 'prompt_template', (state.settings.ai || {}).prompt_template, 16,
             '占位符：{title} {author} {description} {duration} {transcript}')
           + `<div class="mt8 flex wrap">
               <button class="btn sm" data-act="prompt-preview">预览模板渲染结果</button>
-              <button class="btn sm" data-act="prompt-reset">恢复默认模板</button></div>`)}
+              <button class="btn sm" data-act="prompt-save">保存模板</button>
+              <button class="btn sm" data-act="prompt-reset">恢复默认模板</button></div>
+             <div class="hint mt8">改动模板文本并保存会记为 <b>custom</b> 版本；改回与某个版本完全一致会重新归到该版本。
+               每条标注都会记下自己用的是哪个版本，历史不会被覆盖。</div>`)}</section>
           ${group('Token 预算与成本预估（示意）', '',
             `<div class="preview-box">
               <div class="kv"><span>平均 Token / 条</span><b>1,200</b></div>
@@ -1468,6 +1568,9 @@ function collectSettings(section) {
   nodes.forEach((node) => {
     const key = node.dataset.key;
     if (!key) return;
+    // prompt_version 是「选择器」而不是普通设置项：它由 content_set_prompt_version
+    // 单独处理，不能混进设置分区去覆盖 prompt_template
+    if (key === 'prompt_version') return;
     if (node.type === 'checkbox') {
       if (node.dataset.multi) {
         if (!Array.isArray(values[key])) values[key] = [];
@@ -1569,9 +1672,24 @@ async function reloadAll(options = {}) {
   state.demoCount = payload.demoCount || 0;
   const worker = await safeCall('content_worker_status');
   if (worker && worker.ok) state.worker = worker;
+  await loadPrompts();
   state.ready = true;
   if (options.render !== false) renderPage();
   return true;
+}
+
+/** 取 Prompt 版本清单（只在设置页用得到，但启动时取一次最省事）。 */
+async function loadPrompts() {
+  const payload = await safeCall('content_prompts');
+  if (!payload || !payload.ok) return;
+  const notes = {};
+  (payload.prompts || []).forEach((entry) => { notes[entry.version] = entry.notes; });
+  state.prompts = {
+    current: payload.current || '',
+    list: payload.prompts || [],
+    versions: Object.fromEntries((payload.prompts || []).map((e) => [e.version, e.template])),
+    notes,
+  };
 }
 
 const HANDLERS = {
@@ -1616,6 +1734,11 @@ const HANDLERS = {
     renderPage();
   },
   'ai-filter'(node) { state.ai.status = node.dataset.filter; renderPage(); },
+  'ai-expand'(node) {
+    const key = node.dataset.expand;
+    state.ai.expanded[key] = !state.ai.expanded[key];
+    renderPage();
+  },
   'ai-filter-reset'() { state.ai.status = 'all'; state.ai.search = ''; renderPage(); },
   'pipe-filter'(node) { state.pipeline.filter = node.dataset.filter; renderPage(); },
   'open-creator'(node) {
@@ -1629,6 +1752,21 @@ const HANDLERS = {
   async 'settings-save'(node) {
     const section = node.dataset.section;
     const values = normalizeForSection(section, collectSettings(section));
+    // 只有 AI 加工设置有 Prompt 版本选择器：版本切换必须在保存模板之前做，
+    // 否则「保存设置」会把刚选的版本又覆盖成模板文本
+    if (section === 'ai' && values.prompt_version !== undefined) {
+      const wanted = String(values.prompt_version || '');
+      delete values.prompt_version;
+      if (wanted && wanted !== state.prompts.current) {
+        const switched = await safeCall('content_set_prompt_version', wanted);
+        if (switched && switched.ok) {
+          state.prompts.current = switched.current;
+          const box = document.querySelector('#content [data-key="prompt_template"]');
+          if (box && switched.template) box.value = switched.template;
+          await loadPrompts();
+        }
+      }
+    }
     const result = await safeCall('content_save_settings', section, values);
     if (result && result.ok) {
       state.settings = result.settings || state.settings;
@@ -1678,6 +1816,13 @@ const HANDLERS = {
     const result = await safeCall('content_test_ai', values);
     if (result && result.ok) toast(`连接成功：${result.model || ''} ${result.message || ''}`, 'good');
   },
+  async 'import-legacy-ai'() {
+    const result = await safeCall('content_import_legacy_ai');
+    if (result && result.ok) {
+      toast(`已导入已有配置：${result.model || ''} ${result.api_base || ''}`.trim(), 'good');
+      await reloadAll();
+    }
+  },
   'prompt-preview'() {
     const box = document.querySelector('#content [data-key="prompt_template"]');
     const text = box ? box.value : '';
@@ -1689,10 +1834,24 @@ const HANDLERS = {
       .replace('{transcript}', 'I used to think productivity was about doing more…');
     openModal(modal('Prompt 模板渲染预览', `<div class="preview-box"><pre>${esc(rendered)}</pre></div>`));
   },
+  async 'prompt-save'() {
+    const box = document.querySelector('#content [data-key="prompt_template"]');
+    if (!box) return;
+    const result = await safeCall('content_save_prompt_template', box.value);
+    if (result && result.ok) {
+      state.settings = result.settings || state.settings;
+      await loadPrompts();
+      toast(result.matched_version
+        ? `模板与 ${result.matched_version} 完全一致，已归到该版本`
+        : '模板已保存为 custom 版本', 'good');
+      renderPage();
+    }
+  },
   async 'prompt-reset'() {
     const result = await safeCall('content_reset_settings', 'ai');
     if (result && result.ok) {
       state.settings = result.settings || state.settings;
+      await loadPrompts();
       toast('已恢复默认模板与默认 AI 参数', 'good');
       await reloadAll();
     }

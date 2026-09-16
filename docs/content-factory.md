@@ -144,12 +144,43 @@ message, stage(download|transcript|enrich), index, total, enrichment?, elapsed? 
 ### 5. 交接失败不能连累下载
 
 `Api._notify_content_factory` 整体包在 try/except 里：
-内容工厂出问题只写日志，下载主流程必须照常成功
-（`test_content_download_handoff.py::test_handoff_failure_does_not_break_the_download` 守这条）。
+内容工厂出问题只写日志，下载主流程必须照常成功（`test_content_download_handoff.py::test_handoff_failure_does_not_break_the_download` 守这条）。
 
 ---
 
-## 六、怎么跑 / 怎么测
+## 六、AI 标注的失败语义（给其他模块的契约）
+
+`enrich_one(item_id)` **不抛异常**，任何失败都返回 `{"ok": False, "error": <人能看懂的原因>}`，
+同时把内容标成 `ai_status="failed"` 并把同一句话写进 `content_items.last_error`。
+界面只读 `last_error` 这一个字段，所以「原因要能照着做」是这个接口的硬要求。
+
+已实现的失败分类（全部真机实测过）：
+
+| 场景 | `last_error` 大致内容 |
+|---|---|
+| 没配 Key | 未配置 API Key：请在「设置 → AI 加工设置」里填写后重试 |
+| Key 无效（HTTP 401/403） | API Key 无效或没有权限：…检查 API Key（附服务端原话） |
+| 模型名/参数错（400） | 请求被拒绝：通常是模型名或参数不对…（附服务端原话） |
+| 地址错（404） | 接口地址不对：应形如 `https://api.deepseek.com/v1`，不要带 `/chat/completions` |
+| 额度不足/限流（402/429） | 额度不足或请求过于频繁… |
+| 服务端故障（5xx） | 服务端错误（503）：通常是服务商临时故障，稍后重试即可 |
+| 字幕太短 | 字幕文本过短（N 字符，至少要 40 字符）…请补全字幕或手工粘贴 |
+| 无字幕且无 ASR | 该内容没有字幕轨…（ASR 相关文案由转写层给） |
+| 模型返回非 JSON | 模型返回里找不到合法 JSON 对象 |
+
+两条重要行为：
+
+1. **HTTP 失败不重试**。只有"模型答了但不是合法 JSON"才重试一次（并明确要求只输出 JSON）。
+   否则「Key 无效」这种必然失败的场景会让用户白等两轮请求。
+2. **字幕短于 `MIN_TRANSCRIPT_CHARS`（40）直接失败且不发请求**。
+   实测 17 字符的占位字幕会被"标注"出一份看着像模像样、实际毫无价值的结果
+   （连占位文字都被当成地道表达），那种结果比明确失败更糟。
+
+`ai_status` 取值：`pending → queued → running → done | failed`。
+
+---
+
+## 七、怎么跑 / 怎么测
 
 ```powershell
 # 启动（v2 主界面 = 内容工厂外壳）
@@ -169,12 +200,23 @@ python scripts/capture_ui.py docs/ui-screenshots --demo
 ```
 
 **跑通真实 AI 标注**：`设置 → AI 加工设置` 填 API Key（服务商 / 模型 / max_tokens /
-temperature / 输出语言 / prompt 模板都在这一页）→ `测试连接` → 回 `AI 加工` 点
-`重新分析`。没有 Key 时链路照样走完，只是停在"失败 + 原因"。
+temperature / 输出语言 / prompt 模板都在这一页；若下载器里已配过，直接点「导入已有配置」）
+→ `测试连接` → 回 `AI 加工` 点 `重新分析`。没有 Key 时链路照样走完，只是停在"失败 + 原因"。
+
+两个真机验证脚本（会真的联网，只用于人工排查，不进测试套件）：
+
+```powershell
+# 成功路径：真的调模型，打印 12 个字段、耗时、尝试次数，并从库里读回来校验落盘
+python scripts/verify_ai_closure.py --limit 3 --reuse-learning
+
+# 失败路径：故意制造 7 种失败（错误 Key / 错误模型 / 错误地址 / 空回复 /
+# 非 JSON / 坏 JSON / 服务端错误），打印用户实际会看到的那句原因；收尾自动清理
+python scripts/verify_ai_failures.py --reuse-learning
+```
 
 ---
 
-## 七、明确没做（按约定留到下一阶段）
+## 八、明确没做（按约定留到下一阶段）
 
 云端数据库、对象存储上传、真实多平台发布、发布队列、定时 / 24-7 真实调度、
 异常自动恢复、推荐系统、Today 学习页、多用户与登录体系、Tony Learning OS 前端。
