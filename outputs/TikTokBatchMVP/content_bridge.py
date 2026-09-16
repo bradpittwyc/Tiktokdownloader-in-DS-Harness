@@ -204,7 +204,7 @@ class ContentFactoryApi:
 
     def content_choose_folder(self, kind="video"):
         """复用下载器的目录选择对话框。"""
-        chooser = getattr(self.downloader, "choose_folder", None)
+        chooser = getattr(self._downloader, "choose_folder", None)
         if not callable(chooser):
             return {"ok": False, "error": "当前环境不支持目录选择"}
         path = chooser()
@@ -213,7 +213,7 @@ class ContentFactoryApi:
         return {"ok": True, "path": path, "kind": kind}
 
     def content_open_folder(self, path):
-        opener = getattr(self.downloader, "open_folder", None)
+        opener = getattr(self._downloader, "open_folder", None)
         if callable(opener):
             return opener(path)
         return {"ok": False, "error": "当前环境不支持打开目录"}
@@ -297,7 +297,7 @@ class ContentFactoryApi:
         下好的作品，不必重新抓一遍。
         """
         videos = []
-        records = getattr(self.downloader, "_ui_records", None)
+        records = getattr(self._downloader, "_ui_records", None)
         if isinstance(records, dict):
             for handle, bucket in records.items():
                 if not isinstance(bucket, dict):
