@@ -47,6 +47,18 @@ STATE_SUFFIXES = ("set", "mask", "configured", "state", "present", "ready")
 
 PROVIDER_KINDS = ("llm", "asr", "storage", "publish")
 
+# 连接测试的三档成本策略（顺序 = 从便宜到贵）
+PROBE_STRATEGIES = ("config_only", "models", "chat_min")
+PROBE_CONFIG_ONLY = "config_only"
+PROBE_MODELS = "models"
+PROBE_CHAT = "chat_min"
+
+# 允许在 provider.extra 里按实例覆盖的探针相关键。
+# 为什么要留这个口子：厂商 endpoint 会变（尤其是自建网关与国内厂商），
+# 与其把新的规则硬编码进代码，不如让「数据」表达；但覆盖值必须是**相对路径**，
+# 否则一个被篡改的配置就能把 Bearer 密钥送到别的域名去。
+EXTRA_OVERRIDE_KEYS = ("chat_path", "models_path", "probe")
+
 
 def normalize_field_name(name):
     """字段名归一化：camelCase → snake_case、去空白、转小写。"""
@@ -110,7 +122,10 @@ class ProviderType:
     note: str = ""
 
     def public(self):
-        """给界面用的类型描述：有哪些类型、默认填什么、要填几个凭据字段。"""
+        """给界面用的类型描述：有哪些类型、默认填什么、要填几个凭据字段。
+
+        `models` 只是**建议值**（模型名变化很快），不是白名单，不做任何校验。
+        """
         return {
             "type_id": self.type_id,
             "label": self.label,
@@ -123,6 +138,8 @@ class ProviderType:
             "requires_base_url": self.requires_base_url,
             "requires_model": self.requires_model,
             "probe": self.probe,
+            "models_path": self.models_path,
+            "chat_path": self.chat_path,
             "note": self.note,
         }
 
@@ -334,6 +351,55 @@ def is_secret_name(name):
     return is_secret_field(name)
 
 
+def _validate_path_override(value, field):
+    """校验 extra 里的路径覆盖。只允许相对路径（防止把密钥送到别的域名）。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "://" in text or text.startswith("//"):
+        return f"{field} 必须是相对路径（以 / 开头），不能是完整 URL：{text}"
+    if not text.startswith("/"):
+        return f"{field} 必须以 / 开头：{text}"
+    if re.search(r"\s", text):
+        return f"{field} 不能包含空格：{text}"
+    if "?" in text or "#" in text:
+        return f"{field} 不能带查询串或锚点：{text}"
+    return ""
+
+
+def catalog_problems():
+    """Provider 目录的自检：返回问题清单（空 = 目录本身是自洽的）。
+
+    目录是**数据**，数据也会写错（重复 type_id、探针名拼错、默认地址非法…）。
+    与其等到运行时才发现，不如让测试断言这个函数返回空列表。
+    """
+    problems = []
+    seen = set()
+    for spec in PROVIDER_TYPES:
+        if spec.type_id in seen:
+            problems.append(f"type_id 重复：{spec.type_id}")
+        seen.add(spec.type_id)
+        if spec.kind not in PROVIDER_KINDS:
+            problems.append(f"{spec.type_id}: 未知 kind {spec.kind!r}")
+        if spec.probe not in PROBE_STRATEGIES:
+            problems.append(f"{spec.type_id}: 未知 probe {spec.probe!r}")
+        for name, path in (("models_path", spec.models_path), ("chat_path", spec.chat_path)):
+            problem = _validate_path_override(path, name)
+            if problem:
+                problems.append(f"{spec.type_id}: {problem}")
+        if spec.default_base_url:
+            problem = validate_base_url(spec.default_base_url)
+            if problem:
+                problems.append(f"{spec.type_id}: 默认 base_url 非法 —— {problem}")
+        if spec.probe == PROBE_MODELS and not spec.models_path:
+            problems.append(f"{spec.type_id}: 用 models 探针却没有 models_path")
+        if spec.probe == PROBE_CHAT and not spec.chat_path:
+            problems.append(f"{spec.type_id}: 用 chat_min 探针却没有 chat_path")
+        if spec.kind in ("llm", "asr") and not spec.credential_fields:
+            problems.append(f"{spec.type_id}: {spec.kind} 类型没有声明凭据字段")
+    return problems
+
+
 def now_text():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -368,6 +434,29 @@ class ProviderConfig:
     def credential_fields(self):
         spec = self.spec
         return tuple(spec.credential_fields) if spec else ("api_key",)
+
+    @property
+    def probe_strategy(self):
+        """连接测试策略：实例 extra 覆盖 > 类型目录 > 兜底 chat_min。"""
+        override = str(self.extra.get("probe") or "").strip()
+        if override in PROBE_STRATEGIES:
+            return override
+        spec = self.spec
+        return spec.probe if spec else PROBE_CHAT
+
+    def probe_path(self, strategy=None):
+        """某档探测要用的路径：实例 extra 覆盖 > 类型目录。
+
+        只接受**相对路径**：否则一份被篡改的配置就能把 Authorization 头送到别的域名去。
+        """
+        strategy = strategy or self.probe_strategy
+        key = "models_path" if strategy == PROBE_MODELS else "chat_path"
+        override = str(self.extra.get(key) or "").strip()
+        if override.startswith("/") and "://" not in override:
+            return override
+        spec = self.spec
+        default = (spec.models_path if strategy == PROBE_MODELS else spec.chat_path) if spec else ""
+        return default or ("/models" if strategy == PROBE_MODELS else "/chat/completions")
 
     def __post_init__(self):
         self.provider_id = str(self.provider_id or "").strip()
@@ -424,6 +513,16 @@ class ProviderConfig:
                     errors.append({
                         "field": f"extra.{key}", "code": "secret_in_extra",
                         "message": f"extra 里不允许放密钥字段 {key!r}：请用凭据库（credential_ref）保存"})
+            probe = str(self.extra.get("probe") or "").strip()
+            if probe and probe not in PROBE_STRATEGIES:
+                errors.append({
+                    "field": "extra.probe", "code": "invalid_probe",
+                    "message": f"probe 只能是 {' / '.join(PROBE_STRATEGIES)}：{probe!r}"})
+            for key in ("models_path", "chat_path"):
+                problem = _validate_path_override(self.extra.get(key), key)
+                if problem:
+                    errors.append({"field": f"extra.{key}", "code": "invalid_path_override",
+                                   "message": problem})
         return errors
 
     def validate_or_raise(self):

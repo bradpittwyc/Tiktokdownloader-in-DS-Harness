@@ -47,6 +47,10 @@ AI_PROVIDER_ID = "ai"
 # 这些字段属于 provider 级配置（注册表），不属于设置页表单
 PROVIDER_FIELDS = ("timeout", "enabled", "label", "extra", "credential_ref")
 
+# 「已迁移」标记写在 provider 记录的 extra 里（非密钥），
+# 这样重启之后也不会又冒出一个把明文写回设置的镜像。
+LEGACY_MIRROR_FLAG = "legacy_mirror"
+
 
 class ProviderSettingsAdapter:
     """设置页 ↔ Provider 层。所有方法都不返回明文密钥（`reveal_api_key` 除外）。"""
@@ -97,6 +101,29 @@ class ProviderSettingsAdapter:
         """把当前设置物化成注册表里的一条 provider 记录（幂等，写操作）。"""
         return self.registry.upsert(self.provider())
 
+    # ---- 迁移状态 ------------------------------------------------------
+    def mirror_enabled(self):
+        """现在还应不应该把密钥镜像回旧设置字段？
+
+        只有「还没迁移过」的装机才需要镜像（那是为了让现有 EnrichmentService 继续可用）。
+        迁移一旦完成，标记会落在 provider 记录的 extra 里，重启后依然生效 ——
+        否则用户重启一次，明文就又会被写回设置 JSON。
+        """
+        if not self.mirror_legacy:
+            return False
+        stored = self.registry.get(self.provider_id)
+        if stored is not None and stored.extra.get(LEGACY_MIRROR_FLAG) is False:
+            return False
+        return True
+
+    def mark_migrated(self, migrated=True):
+        """持久化「已迁移 / 未迁移」标记（写在 provider 记录的 extra 里）。"""
+        self.ensure_provider()
+        config = self.registry.get(self.provider_id)
+        extra = dict(config.extra or {})
+        extra[LEGACY_MIRROR_FLAG] = not bool(migrated)
+        return self.registry.update(self.provider_id, extra=extra)
+
     def api_key_state(self):
         """密钥状态：是否已配置 / 掩码 / 来源。**不含明文**。"""
         config = self.provider()
@@ -136,12 +163,19 @@ class ProviderSettingsAdapter:
         - 非密钥字段 → 设置 JSON，行为与今天完全一致；
         - 密钥字段 → 凭据库；空值 / 空白值 = **忽略**，绝不删除已存密钥；
         - provider 级字段（timeout / enabled / label / extra）→ 注册表；
-        - 默认把密钥镜像回 `ai.api_key`，让现有 EnrichmentService 继续可用。
+        - 只有「还没迁移过」的装机才把密钥镜像回 `ai.api_key`（迁移后自动关闭）。
 
-        先校验后落盘：配置不合法时**什么都不写**，不会留下半截状态。
+        顺序是刻意的：先校验配置 → 再确认凭据后端可写 → 再写凭据 → 最后才写设置。
+        任何一步失败都**什么都不落盘**（fail closed）：
+        绝不允许「密钥没存进去，却明文写进了设置 JSON」这种静默降级。
         """
         values = dict(values or {})
         provider_values = {key: values.pop(key) for key in PROVIDER_FIELDS if key in values}
+        if "extra" in provider_values:
+            # extra 是累加的（里面有 legacy_mirror 这类标记），不做整段替换
+            merged = dict(self.provider().extra or {})
+            merged.update(dict(provider_values["extra"] or {}))
+            provider_values["extra"] = merged
         secrets = {key: value for key, value in values.items() if is_secret_name(key)}
         plain = {key: value for key, value in values.items() if key not in secrets}
 
@@ -152,25 +186,113 @@ class ProviderSettingsAdapter:
                     "errors": errors, "code": errors[0]["code"], "field": errors[0]["field"],
                     "apiKey": self.api_key_state()}
 
-        saved = self.settings.update(AI_SECTION, plain) if plain else {}
+        new_secrets = {key: value for key, value in secrets.items() if str(value or "").strip()}
+        if new_secrets and not self.credentials.writable():
+            reason = self.credentials.unavailable_reason()
+            LOGGER.warning("拒绝保存密钥：%s", reason)
+            return {"ok": False, "saved": False, "stored": [], "skipped": list(secrets),
+                    "code": "credential_backend_unavailable", "field": "api_key",
+                    "error": reason, "existingKept": True, "apiKey": self.api_key_state()}
+
         result = {"ok": True, "stored": [], "skipped": [], "mirrored": False}
         config = self.provider()
         if secrets:
             written = self.credentials.put(config.credential_ref, secrets)
             result["stored"] = written["stored"]
             result["skipped"] = written["skipped"]
-            use_mirror = self.mirror_legacy if mirror is None else bool(mirror)
-            api_key = secrets.get("api_key")
-            if use_mirror and api_key is not None and str(api_key).strip():
-                self.settings.update(AI_SECTION, {"api_key": str(api_key).strip()})
+            if not written["ok"] and new_secrets:
+                # 凭据没写成功 → 后面的设置与镜像一律不做（这就是 fail closed）
+                result.update({"ok": False, "saved": False, "code": written["code"],
+                               "error": written["error"], "existingKept": True,
+                               "apiKey": self.api_key_state()})
+                return result
+            use_mirror = self.mirror_enabled() if mirror is None else bool(mirror)
+            api_key = str(secrets.get("api_key") or "").strip()
+            if use_mirror and api_key:
+                # 兼容镜像：并入同一次设置写入（一次落盘，不留中间状态）
+                plain = {**plain, "api_key": api_key}
                 result["mirrored"] = True
 
+        saved = self.settings.update(AI_SECTION, plain) if plain else {}
         self.ensure_provider()
         if provider_values:
             config = self.registry.update(self.provider_id, **provider_values)
         result["provider"] = config.public(self.credentials)
         result["apiKey"] = self.api_key_state()
         result["saved"] = bool(saved)
+        return result
+
+    # ---- 迁移：旧设置里的明文密钥 → 凭据库 ------------------------------
+    def migrate_legacy_secret(self):
+        """把设置 JSON 里的明文 `ai.api_key` 迁进凭据库，成功后清掉旧字段。
+
+        步骤（每一步失败都停在那一步，**绝不在凭据没存好的情况下删旧密钥**）：
+
+            旧 settings.api_key
+                  ↓ 1. 写入凭据库（后端不可用 → 直接失败返回，旧值原样保留）
+            CredentialStore
+                  ↓ 2. 回读校验（读不回来说明没存好 → 回滚本次写入并返回失败）
+                  ↓ 3. 清除旧字段 + 持久化「已迁移」标记（此后不再镜像明文）
+            完成
+
+        幂等：重复运行只会看到「已经迁移过」，不会重复创建、不会覆盖已有密钥。
+        """
+        section = self.section()
+        legacy = str(section.get("api_key") or "").strip()
+        config = self.provider()
+        ref, fields = config.credential_ref, list(config.credential_fields)
+        stored_ready = self.credentials.is_set(ref, fields)
+
+        if not legacy:
+            if stored_ready:
+                # 典型情况：已经迁移过（或本来就用凭据库）
+                self.mark_migrated(True)
+                return {"ok": True, "migrated": False, "reason": "no-legacy-secret",
+                        "credentialConfigured": True, "mirrorLegacy": False,
+                        "apiKey": self.api_key_state()}
+            return {"ok": True, "migrated": False, "reason": "no-secret-to-migrate",
+                    "credentialConfigured": False, "mirrorLegacy": self.mirror_enabled(),
+                    "apiKey": self.api_key_state()}
+
+        if stored_ready:
+            # 凭据库里已经有值：以它为准，不覆盖（幂等 & 不损坏新密钥），
+            # 只负责把旧字段清掉并关闭镜像。
+            cleared = self._reset_legacy_api_key()
+            self.mark_migrated(True)
+            return {"ok": True, "migrated": False, "reason": "credential-already-present",
+                    "clearedLegacy": cleared, "credentialConfigured": True, "mirrorLegacy": False,
+                    "apiKey": self.api_key_state()}
+
+        if not self.credentials.writable():
+            reason = self.credentials.unavailable_reason()
+            LOGGER.warning("拒绝迁移旧密钥：%s", reason)
+            return {"ok": False, "migrated": False, "code": "credential_backend_unavailable",
+                    "error": reason, "legacyKept": True, "existingKept": True,
+                    "apiKey": self.api_key_state()}
+
+        written = self.credentials.put(ref, {"api_key": legacy})
+        if not written["ok"]:
+            return {"ok": False, "migrated": False, "code": written["code"],
+                    "error": written["error"], "legacyKept": True, "existingKept": True,
+                    "apiKey": self.api_key_state()}
+
+        # 回读校验：存进去了、也读得回来，才算迁移成功
+        if self.credentials.reveal(ref, "api_key") != legacy:
+            rolled_back = self.credentials.drop(ref, "api_key")
+            return {"ok": False, "migrated": False, "code": "credential_verify_failed",
+                    "error": "凭据写入后回读校验失败，已回滚本次写入；旧设置中的密钥保持原样",
+                    "rolledBack": bool(rolled_back), "legacyKept": True, "existingKept": True,
+                    "apiKey": self.api_key_state()}
+
+        cleared = self._reset_legacy_api_key()
+        self.mark_migrated(True)
+        state = self.api_key_state()
+        result = {"ok": True, "migrated": True, "reason": "migrated", "clearedLegacy": cleared,
+                  "credentialConfigured": state["configured"], "mirrorLegacy": False,
+                  "mask": state["mask"], "apiKey": state}
+        if not cleared:
+            # 凭据已经安全落库，只是旧字段没清掉 —— 如实报告，不假装干净
+            result["warning"] = "旧字段 api_key 未能清除，请检查设置实现是否支持 save_section()"
         return result
 
     def clear_api_key(self, field="api_key"):
@@ -194,36 +316,49 @@ class ProviderSettingsAdapter:
         return {"ok": True, "removed": removed}
 
     def _reset_legacy_api_key(self):
-        """把旧字段 `ai.api_key` 置空的唯一正确写法。
+        """把旧字段 `ai.api_key` 置空的唯一正确写法。返回是否确实清干净了。
 
         `settings.update()` 对空字符串是「忽略」（这是防止误删的保护），
         所以清除必须走整段保存：读出现有分区 → 改一个键 → 整段写回。
         """
+        if not str(self.section().get("api_key") or ""):
+            return True                                     # 本来就是空的
         section = self.section()
-        if not str(section.get("api_key") or ""):
-            return
         section["api_key"] = ""
         writer = getattr(self.settings, "save_section", None)
-        if callable(writer):
-            writer(AI_SECTION, section)
-        else:                                            # pragma: no cover - 兜底
+        if not callable(writer):                            # pragma: no cover - 兜底
             LOGGER.warning("设置实现缺少 save_section()，无法清除旧字段 api_key")
+            return False
+        try:
+            writer(AI_SECTION, section)
+        except Exception as exc:                            # pragma: no cover - 防御
+            LOGGER.warning("清除旧字段 api_key 失败：%s", type(exc).__name__)
+            return False
+        return not str(self.section().get("api_key") or "")
 
     # ---- 界面视图 ------------------------------------------------------
     def public_view(self):
         """AI 设置页的对外视图：**永远不含明文**，兼容现有字段名。
 
         保留 `api_key: ""` / `apiKeySet: bool` 两个既有键（老界面不用改），
-        新增 `apiKeyMask` / `credentialSource` / `providers` 供新界面使用。
+        新增 `apiKeyMask` / `credentialSource` / `credentialBackend` /
+        `legacyMirror` / `providers` 供新界面使用。
         """
         config = self.provider()
         state = self.api_key_state()
+        status = self.credentials.status()
         view = config.public(self.credentials)
         view.update({
             "api_key": "",
             "apiKeySet": state["configured"],
             "apiKeyMask": state["mask"],
             "credentialSource": state["source"],
+            # 后端不可用时界面要能直接说清「为什么存不了」，而不是只报一句失败
+            "credentialBackend": {"backend": status["backend"], "mode": status["mode"],
+                                  "secure": status["secure"], "writable": status["writable"],
+                                  "reason": status["reason"],
+                                  "insecureEntries": status["insecureEntries"]},
+            "legacyMirror": self.mirror_enabled(),
             "section": self._public_section(),
         })
         return view

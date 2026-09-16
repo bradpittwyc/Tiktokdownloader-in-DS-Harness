@@ -32,24 +32,25 @@ import logging
 import time
 from datetime import datetime
 
-from .credentials import redact
-from .models import (DEFAULT_TIMEOUT, ProviderConfig, ProviderError, coerce_timeout,
-                     match_provider_type, normalize_base_url, provider_type)
+from .credentials import redact, remember_secret
+from .models import (DEFAULT_TIMEOUT, PROBE_CHAT, PROBE_CONFIG_ONLY, PROBE_MODELS,
+                     ProviderConfig, ProviderError, coerce_timeout, match_provider_type,
+                     normalize_base_url, provider_type)
 
 LOGGER = logging.getLogger(__name__)
 
 # 探测请求自己的超时上限：界面上的「测试连接」不该挂几分钟
 PROBE_TIMEOUT_CAP = 15.0
 
-PROBE_CONFIG_ONLY = "config_only"
-PROBE_MODELS = "models"
-PROBE_CHAT = "chat_min"
-
 ERROR_TYPES = (None, "invalid_provider", "unknown_provider", "invalid_config", "missing_credential",
                "auth", "not_found", "timeout", "network", "rate_limit", "server", "http_error",
                "bad_response", "unsupported")
 
 MINIMAL_PROMPT = "ping"
+
+# 错误响应里「哪一段是人话」的通用候选键（不针对任何厂商写分支）
+ERROR_TEXT_KEYS = ("message", "msg", "error_msg", "errmsg", "status_msg", "detail",
+                   "reason", "error_description", "error")
 
 
 def _classify_status(status):
@@ -136,8 +137,12 @@ class ConnectionTester:
             return self._result(config, started, ok=False, error_type="missing_credential",
                                 message=f"尚未配置{spec.credential_label if spec else '凭据'}（{missing}）",
                                 probe=probe or PROBE_CONFIG_ONLY)
+        if secret:
+            # 登记进脱敏表：_stored_secret 已经登记过，但界面直接传进来的临时密钥还没有。
+            # 少了这一步，「服务端把 key 回显在错误里」就只能靠形态匹配兜底。
+            remember_secret(secret)
 
-        strategy = probe or (spec.probe if spec else PROBE_MODELS)
+        strategy = probe or config.probe_strategy
         if strategy == PROBE_CONFIG_ONLY or not config.base_url:
             return self._result(config, started, ok=True, error_type=None,
                                 message="配置与凭据齐备（该类型不做联网探测，避免产生真实调用）",
@@ -159,7 +164,7 @@ class ConnectionTester:
 
     # ---- 具体探测 ------------------------------------------------------
     def _probe_models(self, config, base_url, secret, request_timeout):
-        endpoint = base_url + (config.spec.models_path if config.spec else "/models")
+        endpoint = base_url + config.probe_path(PROBE_MODELS)
         status, payload, error = self._request("GET", endpoint, secret, None,
                                                self._timeout(config, request_timeout))
         if error:
@@ -167,6 +172,9 @@ class ConnectionTester:
                         endpoint=endpoint, probe=PROBE_MODELS)
         if status >= 400:
             kind, message = _classify_status(status)
+            detail = _extract_error(payload)
+            if detail:
+                message = f"{message}（{detail}）"
             return dict(ok=False, error_type=kind, message=message,
                         endpoint=endpoint, probe=PROBE_MODELS, status=status)
         found = None
@@ -186,7 +194,7 @@ class ConnectionTester:
                     probe=PROBE_MODELS, model_found=found)
 
     def _probe_chat(self, config, base_url, secret, request_timeout):
-        endpoint = base_url + (config.spec.chat_path if config.spec else "/chat/completions")
+        endpoint = base_url + config.probe_path(PROBE_CHAT)
         body = {"model": config.model, "messages": [{"role": "user", "content": MINIMAL_PROMPT}],
                 "max_tokens": 1, "temperature": 0, "stream": False}
         status, payload, error = self._request("POST", endpoint, secret, body,
@@ -222,7 +230,15 @@ class ConnectionTester:
         return requests
 
     def _request(self, method, endpoint, secret, body, timeout):
-        """返回 (status, payload, error)。error 为 (error_type, message)。"""
+        """返回 (status, payload, error)。error 为 (error_type, message)。
+
+        两道硬约束：
+        1. 密钥只走 Authorization 头，**永远不进 URL**（URL 会进日志、进历史、进截图）；
+        2. 万一配置把密钥写进了 base_url，直接拒绝发送，而不是把它带出去。
+        """
+        if secret and secret in str(endpoint):
+            return 0, None, ("invalid_config",
+                             "接口地址里出现了凭据，已拒绝发送：密钥只能通过请求头传递")
         headers = {"Accept": "application/json"}
         if secret:
             headers["Authorization"] = f"Bearer {secret}"
@@ -238,7 +254,7 @@ class ConnectionTester:
             kind, message = _classify_exception(exc)
             # INFO 而不是 WARNING：连接测试失败是「按钮的正常结果」，
             # 已经结构化返回给界面了，不需要再进异常页。
-            LOGGER.info("连接测试失败（%s %s）：%s", method, endpoint, message)
+            LOGGER.info("连接测试失败（%s %s）：%s", method, redact(endpoint), message)
             return 0, None, (kind, message)
         status = int(getattr(response, "status_code", 0) or 0)
         payload = None
@@ -302,9 +318,9 @@ class ConnectionTester:
             "kind": config.kind if config else "",
             "label": config.label if config else "",
             "model": config.model if config else "",
-            "base_url": config.base_url if config else "",
+            "base_url": redact(config.base_url if config else ""),
             "probe": probe or PROBE_CONFIG_ONLY,
-            "endpoint": extra.pop("endpoint", ""),
+            "endpoint": redact(extra.pop("endpoint", "")),
             "latency_ms": latency,
             "error_type": error_type,
             "message": _short(message, 400),
@@ -351,21 +367,33 @@ def _config_from_payload(payload):
     )
 
 
-def _extract_error(payload):
-    """从错误响应里抽一句人话（已脱敏）。"""
+def _extract_error(payload, depth=2):
+    """从错误响应里抽一句人话（已脱敏）。
+
+    刻意**不针对任何厂商写分支**：各家响应格式不同（OpenAI 的 `error.message`、
+    国内厂商的 `base_resp.status_msg`、网关的 `msg`…），
+    与其一家一条规则，不如按「常见字段名 + 深度受限的递归」通用地找第一段人话。
+    """
     if isinstance(payload, str):
         return _short(payload, 160)
-    if not isinstance(payload, dict):
+    if depth < 0:
         return ""
-    error = payload.get("error")
-    if isinstance(error, dict):
-        return _short(error.get("message") or error.get("type") or "", 160)
-    if error:
-        return _short(error, 160)
-    base = payload.get("base_resp") or {}
-    if isinstance(base, dict) and base.get("status_msg"):
-        return _short(base.get("status_msg"), 160)
-    return _short(payload.get("message") or "", 160)
+    if isinstance(payload, dict):
+        for key in ERROR_TEXT_KEYS:
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return _short(value, 160)
+        for value in payload.values():
+            if isinstance(value, (dict, list)):
+                found = _extract_error(value, depth - 1)
+                if found:
+                    return found
+    if isinstance(payload, list):
+        for entry in payload:
+            found = _extract_error(entry, depth - 1)
+            if found:
+                return found
+    return ""
 
 
 def test_connection(provider, registry=None, http=None, credentials=None, **kwargs):

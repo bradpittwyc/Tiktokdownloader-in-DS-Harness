@@ -83,7 +83,7 @@ installer\build.ps1 -Installer
 python -m unittest discover -s tests -t tests -v
 ```
 
-376 个测试，全部离线（`-t tests` 不能省）。其中 `test_login_ui.py` /
+416 个测试，全部离线（`-t tests` 不能省）。其中 `test_login_ui.py` /
 `test_continue_ui.py` / `test_status_ui.py` / `test_open_profile_ui.py` 用真实浏览器加载
 `ui/index.html` 并注入假的 `window.pywebview.api`，断言零 JS 运行时错误；
 `test_content_factory_ui.py` 用同样方式守住新的内容工厂外壳
@@ -91,7 +91,7 @@ python -m unittest discover -s tests -t tests -v
 
 内容工厂相关：`test_content_factory.py`（服务层）、`test_content_bridge.py`（桥接暴露面契约）、
 `test_content_download_handoff.py`（下载 → 内容库交接）、`test_content_factory_ui.py`（外壳界面）、
-`test_provider_config.py`（provider 配置 / 密钥 / 连接测试）。
+`test_provider_config.py`（provider 配置 / 密钥 / 连接测试 / fail-closed / 旧密钥迁移）。
 
 ## 目录
 
