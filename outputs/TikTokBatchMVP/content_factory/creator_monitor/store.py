@@ -133,13 +133,6 @@ class CreatorMonitorStore:
                     (creator_id, stamp, stamp))
         return self._row("SELECT * FROM creator_monitor_state WHERE creator_id=?", (creator_id,))
 
-    def states(self, creator_ids=None):
-        rows = self._rows("SELECT * FROM creator_monitor_state")
-        if creator_ids is not None:
-            wanted = {str(value) for value in creator_ids}
-            rows = [row for row in rows if row["creator_id"] in wanted]
-        return {row["creator_id"]: row for row in rows}
-
     def update_state(self, creator_id, **fields):
         payload = self._state_payload(fields)
         if not payload:

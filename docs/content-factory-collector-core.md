@@ -96,6 +96,16 @@ collection_runs(id PK, batch_id, creator_id, creator_handle, trigger, state,
 - run 状态：`success | partial | failed | busy | skipped`。
 - 存储位置不变：`%LOCALAPPDATA%/TikTokBatchMVP/content-factory.db`（与内容库同库）。
 
+**两条并发 / 性能上的硬约束**（都在代码注释里写了原因）：
+
+1. **建任务**：`collection_jobs(content_key)` 上有部分唯一索引（`WHERE state IN
+   ('pending','running')`），再加 `enqueue_many()` 里的活跃 key 预检 ——
+   同一个作品永远只有一条未完成任务；失败过的任务不占位，所以重试仍能建新任务。
+2. **取任务**：`claim_jobs()` 用 CAS（`UPDATE … WHERE id=? AND state='pending'`）
+   把「判断 + 置位」压进一条语句。**不要**写「先查 pending 再逐个标 running」——
+   两个「开始下载」按钮撞在一起时，同一条视频会被下载两遍。
+   一轮采集的多条写入一律合并成一次事务（`enqueue_many` / `mark_many`）。
+
 ---
 
 ## 四、公开接口（服务层）
@@ -125,8 +135,8 @@ poll_creator(creator_id, trigger, newest_only, force)   # 检查一个创作者�
 check_now(creator_id)                                   # 立即检查（忽略排期，仍受并发保护）
 tick(limit, force, trigger)                             # 一轮：把所有到点的创作者检查一遍
 plan(limit, creator_id)                                 # 待办任务 → 下载器形状（不改状态）
-claim(limit, creator_id)                                # 同上，但标记 running（attempts+1）
-mark_running / mark_done / mark_failed                  # 执行方回写
+claim(limit, creator_id)                                # 同上，但 CAS 标记 running
+mark_running / mark_done / mark_failed                  # 执行方回写（批量用 jobs.mark_many）
 reconcile(limit)                                        # 按内容库实际结果收尾任务
 recover_stale(seconds)                                  # running 卡太久 → 退回 pending
 status() / jobs_view() / runs_view() / failures_view()
@@ -200,10 +210,17 @@ self.content_factory.content_collector_start()   # 仅在「工作模式 = auto2
 - 创作者列表：`content_creator_list()` → 每条含 `enabled / is_due / next_check_at /
   poll_interval_text / last_state / last_error / consecutive_failures / item_count`。
 - 新增/编辑：`content_creator_save({handle, display_name, category, priority, poll_interval})`。
+  **驼峰名也认**（`displayName` / `pollIntervalSeconds` / `followerCount` / `videoCount`）；
+  认不出的字段会在返回值的 `ignored` 里列出来，不会静默无效。
 - 启停：`content_creator_toggle(id, enabled)`；立即检查：`content_creator_check_now(id)`。
+  `enabled` 支持字符串 `"true"` / `"false"`。
 - 采集看板：`content_collector_status()` / `content_collection_jobs("pending")` /
   `content_collection_runs()` / `content_collection_failures()`。
-- 实时刷新：轮询 `content_events(since)` 里的 `collectProgress` / `collectJob`。
+- 下发下载：`content_collect_download(limit, folder, quality, background)` ——
+  下载器不可用或下载目录没配时**当场**返回 `{ok: false, error}` 并留下一条失败记录，
+  不会先回「已开始下载」再在后台无声失败。
+- 实时刷新：轮询 `content_events(since)` 里的 `collectProgress` / `collectJob` /
+  `collectRunner`。
 
 ### 4. 与 Pipeline / 下载器队列的关系
 

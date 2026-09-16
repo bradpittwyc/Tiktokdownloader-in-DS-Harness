@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -490,6 +491,40 @@ class JobStoreTests(TempEnvCase):
         self.assertEqual(jobs.requeue_stale(seconds=-1), 1)
         self.assertEqual(jobs.job(job_id)["state"], "pending")
 
+    def test_a_job_can_only_be_claimed_once(self):
+        """CAS 抢占：同一个任务不能被两个调用者同时拿走（否则会下载两遍）。"""
+        jobs = CollectionJobStore(self.store)
+        job_ids = [jobs.enqueue(self.setup_job(f"tiktok:{index}"))["job"]["id"]
+                   for index in range(1, 5)]
+
+        first = jobs.claim_jobs(job_ids)
+        self.assertEqual(sorted(first), sorted(job_ids))
+        self.assertEqual(jobs.claim_jobs(job_ids), [], "已经 running 的任务不能再被抢")
+        self.assertEqual(jobs.claim_jobs(job_ids[:2]), [])
+        self.assertEqual(jobs.counts()["running"], 4)
+        self.assertTrue(all(jobs.job(job_id)["attempts"] == 1 for job_id in job_ids))
+
+    def test_concurrent_claims_never_hand_out_the_same_job_twice(self):
+        jobs = CollectionJobStore(self.store)
+        job_ids = [jobs.enqueue(self.setup_job(f"tiktok:{index}"))["job"]["id"]
+                   for index in range(1, 13)]
+        claimed, lock = [], threading.Lock()
+
+        def worker():
+            got = jobs.claim_jobs(job_ids)
+            with lock:
+                claimed.extend(got)
+
+        threads = [threading.Thread(target=worker) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(claimed), len(job_ids), "6 个线程一共只能抢到 12 次")
+        self.assertEqual(len(set(claimed)), len(job_ids), "同一个任务不能被抢两次")
+        self.assertEqual(jobs.counts()["running"], len(job_ids))
+
     def test_deleting_a_creator_cancels_its_open_jobs(self):
         jobs = CollectionJobStore(self.store)
         jobs.enqueue(self.setup_job(creator_id=self.creator_id))
@@ -590,6 +625,15 @@ class HandoffTests(TempEnvCase):
         self.assertEqual(collector.jobs.counts()["failed"], 1)
         self.assertEqual(collector.jobs.counts()["running"], 0, "不能有任务卡在 running")
 
+    def test_every_early_return_keeps_the_documented_shape(self):
+        collector = self.collector(videos=[VIDEO_A])
+        collector.poll_creator(self.creator_id)
+        no_folder = download_jobs(collector, self.FakeDownloader())
+        no_downloader = download_jobs(collector, None, folder=str(self.root))
+        for result in (no_folder, no_downloader):
+            for key in ("ok", "downloaded", "failedCount", "jobs", "failed", "folder", "quality"):
+                self.assertIn(key, result, f"提前返回也要保持同样的形状：缺 {key}")
+
     def test_missing_folder_and_missing_downloader_are_explained(self):
         collector = self.collector(videos=[VIDEO_A])
         collector.poll_creator(self.creator_id)
@@ -608,6 +652,55 @@ class HandoffTests(TempEnvCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["downloaded"], 0)
         self.assertIn("没有待下载", result["message"])
+
+    def test_a_job_without_a_usable_link_is_failed_not_silently_completed(self):
+        """下载器只认 id + url：交不出去的任务必须写明原因，不能悄悄标成完成。"""
+        only_link = {"url": "https://vm.tiktok.com/abc123", "title": "只有短链",
+                     "duration": 30, "type": "video"}
+        collector = self.collector(videos=[only_link])
+        poll = collector.poll_creator(self.creator_id)
+        self.assertEqual(poll["summary"]["queued"], 1, "只有链接的候选也要能排队")
+
+        downloader = self.FakeDownloader()
+        result = download_jobs(collector, downloader, folder=str(self.root / "downloads"))
+        self.assertEqual(downloader.calls, [], "没有 id 的内容根本不该交给下载器")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["failedCount"], 1)
+        job = collector.jobs.jobs(states=("failed",), limit=5)[0]
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("缺少作品 id 或链接", job["last_error"])
+
+    def test_success_without_a_library_row_is_flagged(self):
+        """下载器说成功、内容库却没有记录时，不能让这条变成无声的成功。"""
+        collector = self.collector(videos=[VIDEO_A])
+        collector.poll_creator(self.creator_id)
+        download_jobs(collector, self.FakeDownloader(), folder=str(self.root / "downloads"))
+        job = collector.jobs.jobs(states=("done",), limit=5)[0]
+        self.assertEqual(job["state"], "done")
+        self.assertEqual(job["content_item_id"], "")
+        self.assertIn("内容库暂无对应记录", job["last_error"])
+
+    def test_a_library_row_confirms_the_job(self):
+        class IngestingDownloader(self.FakeDownloader):
+            def __init__(self, store):
+                super().__init__()
+                self.store = store
+
+            def download(self, videos, folder, quality, retry_count=3, concurrency=1):
+                for video in videos:
+                    self.store.upsert_item(video["id"], source_type="tiktok",
+                                           source_url=video["url"],
+                                           creator_handle="emilyintech",
+                                           download_status="done")
+                return super().download(videos, folder, quality, retry_count, concurrency)
+
+        collector = self.collector(videos=[VIDEO_A])
+        collector.poll_creator(self.creator_id)
+        download_jobs(collector, IngestingDownloader(self.store),
+                      folder=str(self.root / "downloads"))
+        job = collector.jobs.jobs(states=("done",), limit=5)[0]
+        self.assertTrue(job["content_item_id"], "确认落库后要指回内容库那条记录")
+        self.assertEqual(job["last_error"], "")
 
     def test_failed_jobs_are_retried_on_the_next_poll_and_then_given_up(self):
         """失败 → 下次 polling 自动重排；重试次数用尽后不再打扰下载器。"""

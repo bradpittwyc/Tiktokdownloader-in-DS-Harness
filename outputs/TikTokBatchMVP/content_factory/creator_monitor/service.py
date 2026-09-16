@@ -26,6 +26,19 @@ MAX_BACKOFF_SECONDS = 21600
 CREATOR_EDITABLE = ("display_name", "avatar", "category", "status", "followers",
                     "videos", "priority", "poll_interval")
 
+# 界面 / JS 习惯用的驼峰名（不翻译的话就会「成功但什么都没改」）
+FIELD_ALIASES = {
+    "displayName": "display_name",
+    "pollInterval": "poll_interval",
+    "pollIntervalSeconds": "poll_interval_seconds",
+    "pollIntervalText": "poll_interval",
+    "followerCount": "followers",
+    "videoCount": "videos",
+}
+
+# 这些键由调用方自己处理（不是 Creator 字段，也不算「写错了」）
+IGNORED_KEYS = ("id", "creatorId", "handle", "enabled", "count", "limit")
+
 
 class CreatorMonitorService:
     def __init__(self, store, settings=None, now=None):
@@ -91,6 +104,7 @@ class CreatorMonitorService:
             return {"ok": False, "error": "handle 不能为空"}
         if not HANDLE_PATTERN.match(text):
             return {"ok": False, "error": f"handle 不合法：{text}（只允许字母、数字、. _ -）"}
+        fields, ignored = _normalize_fields(fields)
         existing = self.monitor.find_by_handle(text)
         if existing:
             return {"ok": False, "duplicate": True, "creatorId": existing["id"],
@@ -98,7 +112,7 @@ class CreatorMonitorService:
                     "creator": self.creator(existing["id"])}
 
         priority = intervals.normalize_priority(fields.get("priority"))
-        explicit = fields.get("poll_interval_seconds") or fields.get("pollIntervalSeconds")
+        explicit = fields.get("poll_interval_seconds")
         if explicit:
             seconds = intervals.parse_interval(explicit, self.default_interval_seconds())
         elif fields.get("poll_interval"):
@@ -126,12 +140,13 @@ class CreatorMonitorService:
                     "error": f"创作者 @{text} 已存在",
                     "creator": self.creator(existing["id"]) if existing else None}
         return {"ok": True, "created": True, "creatorId": creator_id,
-                "creator": self.creator(creator_id)}
+                "ignored": ignored, "creator": self.creator(creator_id)}
 
     def update_creator(self, creator_id, **fields):
         row = self.monitor.creator_row(str(creator_id or ""))
         if not row:
             return {"ok": False, "error": "创作者不存在"}
+        fields, ignored = _normalize_fields(fields)
         payload = {}
         for key, value in fields.items():
             if key not in CREATOR_EDITABLE or value is None:
@@ -148,14 +163,26 @@ class CreatorMonitorService:
                 return {"ok": False, "duplicate": True, "error": f"创作者 @{new_handle} 已存在"}
             self.monitor.update_handle(row["id"], new_handle)
         state_fields = {}
+        explicit = fields.get("poll_interval_seconds")
+        if explicit is not None and explicit != "":
+            seconds = intervals.parse_interval(explicit, self.default_interval_seconds())
+            state_fields["poll_interval_seconds"] = seconds
+            payload["poll_interval"] = intervals.format_interval(seconds)
         if "poll_interval" in payload:
             seconds = intervals.parse_interval(payload["poll_interval"], self.default_interval_seconds())
             payload["poll_interval"] = intervals.format_interval(seconds)
             state_fields["poll_interval_seconds"] = seconds
         changed = self.monitor.save_state_and_creator(row["id"], state_fields=state_fields,
                                                       creator_fields=payload)
-        return {"ok": True, "changed": changed or (1 if new_handle else 0),
-                "creator": self.creator(row["id"])}
+        result = {"ok": True, "changed": changed or (1 if new_handle else 0),
+                  "creator": self.creator(row["id"])}
+        if ignored:
+            # 认不出的字段要报出来：界面写错一个字段名却收到 ok=true，
+            # 会变成「保存成功但什么都没变」这种最难查的问题。
+            result["ignored"] = ignored
+        if not payload and not new_handle and not ignored:
+            result["message"] = "没有需要更新的字段"
+        return result
 
     def delete_creator(self, creator_id, cancel_jobs=True):
         row = self.monitor.creator_row(str(creator_id or ""))
@@ -369,3 +396,19 @@ class CreatorMonitorService:
             "failing": len(errors),
             "itemCounts": self.monitor.item_counts_by_creator(),
         }
+
+
+def _normalize_fields(fields):
+    """驼峰别名 -> 服务层字段名，并回报认不出的键。
+
+    回报而不是静默丢弃：界面上写错一个字段名却收到 ok=true，
+    会变成「保存成功但什么都没改」，是最难排查的一类问题。
+    """
+    normalized, ignored = {}, []
+    for key, value in (fields or {}).items():
+        name = FIELD_ALIASES.get(key, key)
+        if name in CREATOR_EDITABLE or name in ("handle", "enabled", "poll_interval_seconds"):
+            normalized[name] = value
+        elif key not in IGNORED_KEYS:
+            ignored.append(key)
+    return normalized, ignored

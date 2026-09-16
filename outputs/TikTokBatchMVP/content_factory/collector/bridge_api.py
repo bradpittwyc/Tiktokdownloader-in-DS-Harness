@@ -30,6 +30,7 @@ pywebview 就发现不了）。必须在 ContentFactoryApi 类体里显式写这
 
 import threading
 
+from content_factory import errors_feed
 from content_factory.creator_monitor import CreatorMonitorService
 
 from .handoff import download_jobs
@@ -45,6 +46,7 @@ class CollectorApi:
         self.store = store
         self.settings = settings
         self.downloader = downloader
+        self._emit = emit or (lambda *_args, **_kwargs: None)
         self.monitor = CreatorMonitorService(store, settings=settings)
         self.collector = build_collector(store, downloader=downloader, settings=settings,
                                          source=source, emit=emit)
@@ -59,13 +61,13 @@ class CollectorApi:
     # ---- Creator 管理 --------------------------------------------------
     def content_creator_list(self, enabled=None, search="", due_only=False, limit=200):
         creators = self.monitor.creators(
-            enabled=None if enabled in (None, "", "all", "全部") else bool(enabled),
-            search=search or "", due_only=bool(due_only), limit=int(limit or 200))
+            enabled=None if enabled in (None, "", "all", "全部") else _as_bool(enabled),
+            search=search or "", due_only=_as_bool(due_only), limit=int(limit or 200))
         return {"ok": True, "creators": creators, "stats": self.monitor.stats()}
 
     def content_creator_save(self, values=None):
         """新增或修改一个 Creator：带 id 是改，不带是新增（handle 唯一）。"""
-        values = dict(values or {})
+        values = _normalize_fields(values or {})
         creator_id = str(values.pop("id", "") or values.pop("creatorId", "") or "")
         handle = values.pop("handle", "")
         if creator_id:
@@ -82,7 +84,7 @@ class CollectorApi:
         return self.monitor.delete_creator(creator_id)
 
     def content_creator_toggle(self, creator_id, enabled=True):
-        return self.monitor.set_enabled(creator_id, bool(enabled))
+        return self.monitor.set_enabled(creator_id, _as_bool(enabled, default=True))
 
     def content_creator_set_interval(self, creator_id, value):
         return self.monitor.set_poll_interval(creator_id, value)
@@ -123,33 +125,106 @@ class CollectorApi:
         """把排好队的采集任务交给下载器。
 
         默认后台执行：下载是分钟级的长任务，界面不能被它卡住。
+        但**能不能开始**要当场判断（下载器在不在、下载目录配没配、有没有待办），
+        否则界面会收到「已开始下载 N 条」，而后台线程里其实什么都没发生。
         """
-        if not background:
-            return download_jobs(self.collector, self.downloader, limit=int(limit or 10),
-                                 folder=folder or "", quality=quality or "")
-        pending = len(self.collector.pending_jobs(limit=int(limit or 10)))
+        limit = int(limit or 10)
+        error = self._download_preflight(folder)
+        if error:
+            self._record_download_failure(error, limit)
+            return {"ok": False, "started": False, "count": 0, "error": error}
+        pending = len(self.collector.pending_jobs(limit=limit))
         if not pending:
             return {"ok": True, "started": False, "count": 0, "message": "没有待下载的采集任务"}
+        if not background:
+            return download_jobs(self.collector, self.downloader, limit=limit,
+                                 folder=folder or "", quality=quality or "")
         threading.Thread(
-            target=download_jobs, args=(self.collector, self.downloader),
-            kwargs={"limit": int(limit or 10), "folder": folder or "", "quality": quality or ""},
+            target=self._download_worker,
+            args=(limit, folder or "", quality or ""),
             daemon=True, name="CollectorDownload").start()
         return {"ok": True, "started": True, "count": pending, "message": f"已开始下载 {pending} 条"}
+
+    def _download_preflight(self, folder=""):
+        """后台任务开始之前能查的错，一律当场查 —— 后台线程里的报错没人看得见。"""
+        if self.downloader is None or not callable(getattr(self.downloader, "download", None)):
+            return "当前环境没有可用的下载器"
+        if not (str(folder or "").strip() or self.collector.download_folder()):
+            return "未配置下载目录：请在「设置 → 存储设置」里填写保存路径"
+        return ""
+
+    def _download_worker(self, limit, folder, quality):
+        """后台下载线程：异常也要落到采集记录里，不能只进 threading 的 excepthook。"""
+        try:
+            result = download_jobs(self.collector, self.downloader, limit=limit,
+                                   folder=folder, quality=quality)
+        except Exception as exc:
+            self._record_download_failure(f"{type(exc).__name__}: {exc}", limit)
+            return
+        if not result.get("ok"):
+            self._record_download_failure(str(result.get("error") or "下载失败"), limit)
+        return result
+
+    def _record_download_failure(self, error, limit):
+        try:
+            self.collector.jobs.record_run(trigger="download", state="failed", error=error,
+                                           message="采集任务下发下载失败")
+        except Exception:
+            pass
+        try:
+            errors_feed.append_error(f"采集任务下发下载失败：{error}")
+        except Exception:
+            pass
 
     # ---- 24/7 常驻（可选）----------------------------------------------
     def content_collector_start(self, interval=None, limit=None):
         with self._lock:
             if self._runner is None:
                 self._runner = CollectorRunner.from_settings(
-                    self.collector, self.settings, limit=limit)
+                    self.collector, self.settings, limit=limit, emit=self._emit)
             if interval:
                 self._runner.interval = max(5, int(interval))
             result = self._runner.start()
-        result["interval"] = self._runner.interval
+            result["interval"] = self._runner.interval
         return result
 
     def content_collector_stop(self):
+        # 先把 runner 取出来再解锁：stop() 会等这一轮跑完（最多 30 秒），
+        # 握着锁等会把其它采集调用一起堵死。
         with self._lock:
-            if self._runner is None:
-                return {"ok": True, "running": False, "message": "常驻采集没有在运行"}
-            return self._runner.stop()
+            runner = self._runner
+        if runner is None:
+            return {"ok": True, "running": False, "message": "常驻采集没有在运行"}
+        return runner.stop()
+
+
+def _as_bool(value, default=False):
+    """界面传过来的布尔值可能是字符串（"false" / "0"），不能直接当 True 用。"""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("0", "false", "no", "off", "否", "停用"):
+        return False
+    if text in ("1", "true", "yes", "on", "是", "启用"):
+        return True
+    return default
+
+
+# 前端习惯用的驼峰名 -> 服务层的下划线名。
+# 不做这层翻译的话，界面上写 pollIntervalSeconds 会「成功但什么都没改」——
+# 这种静默无效最难查。服务层同样认这些别名（见 CreatorMonitorService.FIELD_ALIASES）。
+FIELD_ALIASES = {
+    "displayName": "display_name",
+    "pollInterval": "poll_interval",
+    "pollIntervalSeconds": "poll_interval_seconds",
+    "followerCount": "followers",
+    "videoCount": "videos",
+}
+
+
+def _normalize_fields(values):
+    return {FIELD_ALIASES.get(key, key): value for key, value in dict(values or {}).items()}

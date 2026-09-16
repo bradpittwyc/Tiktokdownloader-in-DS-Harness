@@ -180,6 +180,55 @@ class CollectorApiTests(unittest.TestCase):
         self.assertFalse(result["started"])
         self.assertIn("没有待下载", result["message"])
 
+    def test_background_download_refuses_before_it_starts(self):
+        """后台任务「能不能开始」必须当场回答，不能先回一句「已开始」再无声失败。"""
+        bare_settings = FactorySettings(self.root / "fresh-settings")   # video_path 为空
+        api = CollectorApi(FactoryStore(self.root / "no-folder.db"), settings=bare_settings,
+                           downloader=self.downloader,
+                           source=StaticCandidateSource(videos=[VIDEO_A], complete=True))
+        api.content_creator_save({"handle": "emilyintech"})
+        api.content_collect_tick()
+
+        result = api.content_collect_download()
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["started"])
+        self.assertIn("下载目录", result["error"])
+        self.assertEqual(api.content_collection_jobs()["counts"]["pending"], 1,
+                         "任务不能因为下发失败而消失")
+        runs = api.content_collection_runs()["runs"]
+        self.assertTrue(any("下载目录" in (row["error"] or "") for row in runs),
+                        "下发放失败也要留下记录")
+
+        no_downloader = CollectorApi(FactoryStore(self.root / "no-dl.db"),
+                                     settings=FactorySettings(self.root), downloader=None)
+        refused = no_downloader.content_collect_download()
+        self.assertFalse(refused["ok"])
+        self.assertIn("下载器", refused["error"])
+
+    def test_camel_case_fields_are_applied_not_silently_ignored(self):
+        created = self.api.content_creator_save({
+            "handle": "emilyintech", "displayName": "Emily", "pollIntervalSeconds": 1800})
+        self.assertTrue(created["ok"], created)
+        creator_id = created["creatorId"]
+        self.assertEqual(created["creator"]["display_name"], "Emily")
+        self.assertEqual(created["creator"]["poll_interval_seconds"], 1800)
+
+        updated = self.api.content_creator_save({"id": creator_id, "pollIntervalSeconds": 7200})
+        self.assertTrue(updated["ok"])
+        self.assertEqual(updated["creator"]["poll_interval_seconds"], 7200,
+                         "驼峰字段在编辑时也必须生效")
+        ignored = self.api.content_creator_save({"id": creator_id, "pollIntrvalSeconds": 60})
+        self.assertIn("pollIntrvalSeconds", ignored.get("ignored") or [],
+                      "写错的字段名要报出来，不能返回一个空洞的 ok")
+
+    def test_string_booleans_from_the_ui_are_understood(self):
+        creator_id = self.api.content_creator_save({"handle": "emilyintech"})["creatorId"]
+        self.api.content_creator_toggle(creator_id, "false")
+        self.assertEqual(self.api.content_creator_list(enabled=False)["stats"]["disabled"], 1)
+        self.assertEqual(self.api.content_creator_list(enabled="false")["stats"]["disabled"], 1)
+        self.api.content_creator_toggle(creator_id, "true")
+        self.assertEqual(self.api.content_creator_list(enabled=True)["stats"]["enabled"], 1)
+
     def test_runner_can_be_started_and_stopped_from_the_bridge(self):
         self.api.content_creator_save({"handle": "emilyintech"})
         started = self.api.content_collector_start(interval=5)

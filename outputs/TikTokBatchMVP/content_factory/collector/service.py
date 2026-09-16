@@ -41,8 +41,9 @@ class ContentCollector:
                  policy=None, job_store=None, now=None, owner="", lease_seconds=DEFAULT_LEASE_SECONDS):
         self.store = store
         self.settings = settings
+        self._now = now
         self.monitor = monitor or CreatorMonitorService(store, settings=settings, now=now)
-        self.jobs = job_store or CollectionJobStore(store)
+        self.jobs = job_store or CollectionJobStore(store, now=now)
         self.source = source or StaticCandidateSource(error="未配置候选项来源")
         self.policy = policy or DownloadPolicy.from_settings(settings)
         self._emit = emit or (lambda *_args, **_kwargs: None)
@@ -63,16 +64,26 @@ class ContentCollector:
 
     def _stamp(self):
         from content_factory.creator_monitor import intervals
-        return intervals.now_text()
+        return intervals.stamp(self._now() if self._now else None)
 
     def _creator_lock(self, creator_id):
-        """进程内的每创作者互斥：数据库租约负责跨进程，这个负责同进程并发。"""
+        """进程内的每创作者互斥：数据库租约负责跨进程，这个负责同进程并发。
+
+        用完就把空锁删掉：24/7 常驻跑下去，creator_id 会越攒越多，
+        不清理就是一个慢性内存泄漏。
+        """
         with self._locks_guard:
             lock = self._locks.get(creator_id)
             if lock is None:
                 lock = threading.Lock()
                 self._locks[creator_id] = lock
             return lock
+
+    def _release_creator_lock(self, creator_id, lock):
+        lock.release()
+        with self._locks_guard:
+            if not lock.locked() and self._locks.get(creator_id) is lock:
+                self._locks.pop(creator_id, None)
 
     # ---- 上下文 --------------------------------------------------------
     def _context(self, creator, active_keys=None, history=None, creator_queued=0):
@@ -87,7 +98,30 @@ class ContentCollector:
 
     # ---- 采集主体 ------------------------------------------------------
     def poll_creator(self, creator_id, trigger="poll", newest_only=True, force=False):
-        """检查一个 Creator：发现候选 → 去重 → 判断 → 排队。同步执行，不抛异常。"""
+        """检查一个 Creator：发现候选 → 去重 → 判断 → 排队。同步执行，不抛异常。
+
+        「不抛异常」是硬约束：桥接层的后台线程没人接异常，抛出去就只剩
+        threading 的 excepthook —— 界面看不到、记录里也没有。所以这里连
+        「读 Creator」「写 busy/skipped 记录」这些边角路径也一起兜住。
+        """
+        try:
+            return self._poll_creator(creator_id, trigger=trigger, newest_only=newest_only,
+                                      force=force)
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            run = None
+            try:
+                run = self.jobs.record_run(creator_id=str(creator_id or ""), trigger=trigger,
+                                           state="failed", error=message,
+                                           message="采集器内部错误")
+            except Exception:
+                pass
+            self._report("collectProgress", {"creatorId": str(creator_id or ""),
+                                             "state": "failed", "message": message})
+            return {"ok": False, "error": message, "creatorId": str(creator_id or ""),
+                    "state": "failed", "run": run}
+
+    def _poll_creator(self, creator_id, trigger="poll", newest_only=True, force=False):
         started = self._stamp()
         creator = self.monitor.creator(creator_id)
         if not creator:
@@ -96,28 +130,29 @@ class ContentCollector:
         batch_id = f"batch_{time.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
         if not creator.get("enabled") and not force:
-            self.jobs.record_run(creator_id=creator["id"], creator_handle=handle, trigger=trigger,
-                                 state="skipped", started_at=started, error="创作者已停用",
-                                 batch_id=batch_id)
+            run = self.jobs.record_run(creator_id=creator["id"], creator_handle=handle,
+                                       trigger=trigger, state="skipped", started_at=started,
+                                       error="创作者已停用", batch_id=batch_id)
             return {"ok": False, "skipped": True, "reason": "disabled", "creatorId": creator["id"],
-                    "handle": handle, "message": "创作者已停用，跳过本次检查"}
+                    "handle": handle, "run": run, "message": "创作者已停用，跳过本次检查"}
 
         lock = self._creator_lock(creator["id"])
         if not lock.acquire(blocking=False):
-            self.jobs.record_run(creator_id=creator["id"], creator_handle=handle, trigger=trigger,
-                                 state="busy", started_at=started, error="上一次检查还没结束",
-                                 batch_id=batch_id)
+            run = self.jobs.record_run(creator_id=creator["id"], creator_handle=handle,
+                                       trigger=trigger, state="busy", started_at=started,
+                                       error="上一次检查还没结束", batch_id=batch_id)
             return {"ok": False, "busy": True, "reason": "already_running",
-                    "creatorId": creator["id"], "handle": handle,
+                    "creatorId": creator["id"], "handle": handle, "run": run,
                     "message": "上一次检查还没结束，本次跳过"}
         try:
             if not self.monitor.begin_check(creator["id"], owner=self._owner,
                                             lease_seconds=self._lease_seconds):
-                self.jobs.record_run(creator_id=creator["id"], creator_handle=handle,
-                                     trigger=trigger, state="busy", started_at=started,
-                                     error="该创作者正在被另一个采集进程检查", batch_id=batch_id)
+                run = self.jobs.record_run(creator_id=creator["id"], creator_handle=handle,
+                                           trigger=trigger, state="busy", started_at=started,
+                                           error="该创作者正在被另一个采集进程检查",
+                                           batch_id=batch_id)
                 return {"ok": False, "busy": True, "reason": "leased",
-                        "creatorId": creator["id"], "handle": handle,
+                        "creatorId": creator["id"], "handle": handle, "run": run,
                         "message": "该创作者正在被另一个采集进程检查"}
             self._report("collectProgress", {
                 "creatorId": creator["id"], "handle": handle, "state": "running",
@@ -139,7 +174,7 @@ class ContentCollector:
                         "handle": handle, "run": run}
         finally:
             self.monitor.end_check(creator["id"], owner=self._owner)
-            lock.release()
+            self._release_creator_lock(creator["id"], lock)
 
     def _run_poll(self, creator, trigger, newest_only, batch_id, started):
         handle = creator.get("handle") or ""
@@ -163,9 +198,9 @@ class ContentCollector:
         context = self._context(creator, active_keys=active_keys, history=history)
 
         seen = dedupe.DedupeIndex()
-        decisions, fresh, duplicate_batch, duplicate_queue = [], [], 0, []
+        decisions, duplicate_batch, duplicate_queue = [], 0, []
         existing, filtered = [], []
-        created_jobs = []
+        to_enqueue, accepted = [], []
 
         for candidate in candidates:
             duplicate_reason = seen.check(candidate.content_key, candidate.source_url)
@@ -184,22 +219,30 @@ class ContentCollector:
                 else:
                     filtered.append(decision)
                 continue
-            payload = models.job_payload(
+            to_enqueue.append(models.job_payload(
                 candidate, creator_id=creator["id"], creator_handle=handle, batch_id=batch_id,
                 priority=creator.get("priority") or "中",
-                max_attempts=self.policy.max_attempts, attempts=decision.attempts)
-            outcome = self.jobs.enqueue(payload)
-            if outcome.get("created"):
-                created_jobs.append(outcome["job"])
-                fresh.append(candidate)
-                context["creator_queued"] = context.get("creator_queued", 0) + 1
-                context["active_keys"] = set(context["active_keys"]) | {candidate.content_key}
-                self._report("collectJob", {
-                    "creatorId": creator["id"], "handle": handle,
-                    "state": "queued", "job": outcome["job"],
-                    "contentKey": candidate.content_key, "title": candidate.title})
-            else:
-                duplicate_queue.append(decision)
+                max_attempts=self.policy.max_attempts, attempts=decision.attempts))
+            accepted.append(candidate)
+            # 单次上限按「本次已接受」计数，后面批量入库就算有人抢先了也不会超发
+            context["creator_queued"] = context.get("creator_queued", 0) + 1
+            context["active_keys"] = set(context["active_keys"]) | {candidate.content_key}
+
+        # 一次事务把这一轮的任务全建好（一条一个事务在慢盘上会把一轮采集拖到几分钟）
+        outcome = self.jobs.enqueue_many(to_enqueue)
+        created_jobs = outcome["created"]
+        created_keys = {row.get("content_key") for row in created_jobs}
+        by_key = {row.get("content_key"): row for row in created_jobs}
+        fresh = [candidate for candidate in accepted if candidate.content_key in created_keys]
+        duplicate_queue.extend(
+            {"reason": "job_active", "detail": key} for key in
+            (candidate.content_key for candidate in accepted
+             if candidate.content_key not in created_keys))
+        for candidate in fresh:
+            self._report("collectJob", {
+                "creatorId": creator["id"], "handle": handle,
+                "state": "queued", "job": by_key.get(candidate.content_key),
+                "contentKey": candidate.content_key, "title": candidate.title})
 
         self._sync_creator_profile(creator, result)
         state = result.state
@@ -239,7 +282,14 @@ class ContentCollector:
                 "complete": result.complete, "needsVerification": result.needs_verification}
 
     def _sync_creator_profile(self, creator, result):
-        """把这次读到的头像 / 粉丝数 / 作品数回写到 Creator contract 上。"""
+        """把这次读到的头像 / 粉丝数 / 作品数回写到 Creator contract 上。
+
+        注意 followers 是能同步的（`Api.recognize()` 的 profileStats 里有
+        "48.2K" 这种文本，parse_count 负责还原），**作品数同步不了** ——
+        下载器的主页读取只返回 following / followers / likes 三个数字，
+        没有「作品总数」。所以 videos 只在数据源真的给了计数时才更新，
+        其余情况保留用户填的值，绝不拿「本次发现的条数」冒充作品总数。
+        """
         fields = {}
         if result.avatar and result.avatar != creator.get("avatar"):
             fields["avatar"] = result.avatar
@@ -302,13 +352,17 @@ class ContentCollector:
                 "folder": self.download_folder(), "quality": self.download_quality()}
 
     def claim(self, limit=20, creator_id=None):
-        """取出待办任务并标记为 running（真正交给下载器之前调用一次）。"""
+        """取出待办任务并**原子地**标记为 running（真正交给下载器之前调用一次）。
+
+        用 CAS（claim_jobs）而不是「先查再改」：两个「开始下载」按钮、或者常驻
+        轮询和手动点击撞在一起时，同一个任务只能被一个调用者抢到，
+        否则同一条视频会被下载两遍（第一遍的文件还没落盘，去重也救不了）。
+        """
         planned = self.plan(limit=limit, creator_id=creator_id)
-        claimed = []
-        for job in planned["jobs"]:
-            self.jobs.mark_running(job["id"], attempts=_as_int(job.get("attempts")) + 1)
-            claimed.append(self.jobs.job(job["id"]))
-        return {**planned, "jobs": claimed,
+        claimed_ids = self.jobs.claim_jobs([job["id"] for job in planned["jobs"]])
+        claimed = [job for job in (self.jobs.job(job_id) for job_id in claimed_ids) if job]
+        return {**planned, "count": len(claimed), "jobs": claimed,
+                "claimedIds": claimed_ids,
                 "videos": [models.job_to_downloader_video(job) for job in claimed]}
 
     def mark_running(self, job_id, attempts=None):
@@ -331,21 +385,27 @@ class ContentCollector:
         只在事后读内容库，把已经落库的 job 标成 done、把标注失败的标成 failed。
         """
         jobs = self.jobs.jobs(states=("pending", "running"), limit=limit)
-        done, failed, pending = 0, 0, 0
+        if not jobs:
+            return {"ok": True, "checked": 0, "done": 0, "failed": 0, "pending": 0}
+        library = self.jobs.library_index(limit=20000)   # 一次读全量，不做 N 次单条查询
+        transitions, done, failed, pending = [], 0, 0, 0
         for job in jobs:
-            item = self.jobs.library_item(job.get("content_key"))
+            item = library.get(job.get("content_key"))
             if not item:
                 pending += 1
                 continue
             status = str(item.get("download_status") or "pending").lower()
             if status == "done":
-                self.jobs.mark_done(job["id"], content_item_id=item.get("id") or "")
+                transitions.append({"id": job["id"], "state": "done",
+                                    "content_item_id": item.get("id") or ""})
                 done += 1
             elif status == "failed":
-                self.jobs.mark_failed(job["id"], error=item.get("last_error") or "下载失败")
+                transitions.append({"id": job["id"], "state": "failed",
+                                    "error": item.get("last_error") or "下载失败"})
                 failed += 1
             else:
                 pending += 1
+        self.jobs.mark_many(transitions)          # 一次提交收尾整批
         return {"ok": True, "checked": len(jobs), "done": done, "failed": failed, "pending": pending}
 
     # ---- 设置读取 ------------------------------------------------------
@@ -413,7 +473,9 @@ def _tally(duplicate_queue, existing, filtered, duplicate_batch):
         counts["duplicate_in_batch"] = duplicate_batch
     for group in (duplicate_queue, existing, filtered):
         for decision in group:
-            counts[decision.reason] = counts.get(decision.reason, 0) + 1
+            reason = decision.reason if hasattr(decision, "reason") else decision.get("reason")
+            reason = reason or "unknown"
+            counts[reason] = counts.get(reason, 0) + 1
     return counts
 
 

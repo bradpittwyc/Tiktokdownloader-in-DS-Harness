@@ -124,7 +124,17 @@ class DownloadPolicy:
 
     # ---- 判断 ----------------------------------------------------------
     def decide(self, candidate, context=None):
-        """candidate: CandidateVideo；context: 见下面各 key 的说明。"""
+        """candidate: CandidateVideo；context 里认得这些 key（都可省略）：
+
+        - library_items：content_key -> 内容库那一条（判断「已经有了」）
+        - active_keys：未完成任务的 content_key 集合（判断「队列里已有」）
+        - job_history：content_key -> 最近一次任务（判断「要不要重试」）
+        - creator_queued：本次采集已经接受了几条（单次上限）
+        - disabled：该创作者是否停用（ContentCollector 在进这里之前就挡掉了，
+          这个分支留给直接调用 policy 的地方）
+        - batch_duplicate：批次内重复原因（ContentCollector 用 DedupeIndex
+          先一步挡住，这个分支同样留给直接调用方）
+        """
         context = context or {}
         key = candidate.content_key
         if not key:

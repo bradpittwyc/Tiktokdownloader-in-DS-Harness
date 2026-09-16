@@ -166,22 +166,6 @@ def job_to_downloader_video(job):
     }
 
 
-def job_to_candidate(job):
-    """标准 job -> CandidateVideo（回放 / 重新判断时用）。"""
-    return CandidateVideo(
-        source_video_id=str(job.get("source_video_id") or ""),
-        source_url=str(job.get("source_url") or ""),
-        title=str(job.get("title") or ""),
-        description=str(job.get("description") or ""),
-        cover=str(job.get("cover") or ""),
-        duration=_as_int(job.get("duration")),
-        kind=str(job.get("kind") or VIDEO),
-        source_type=str(job.get("source_type") or "tiktok"),
-        creator_handle=str(job.get("creator_handle") or ""),
-        upload_date=str(job.get("upload_date") or ""),
-    )
-
-
 def job_payload(candidate, creator_id="", creator_handle="", batch_id="", priority="中",
                 max_attempts=3, attempts=0, state="pending"):
     """CandidateVideo -> 入库用的 job 字典（列名与 collection_jobs 一致）。"""
