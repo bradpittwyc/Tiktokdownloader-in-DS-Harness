@@ -151,6 +151,31 @@ window.creators = [
    is_due:true, due_in_seconds:0, next_check_at:''},
 ];
 window.creatorStats = {total:2, enabled:2, disabled:0, due:1, checking:0};
+// 「立即跑 1 条」的假后端：按测试配置一次性给出最终状态。
+window.runOnePlan = {ok:true, processed:1, stage:'done', message:'@nasa 的 1 条内容已处理完成'};
+window.runOneRuns = {};
+window.runOneStarted = (creatorId)=>{
+  const creator = (window.creators.find(c=>c.id===creatorId) || {handle:'nasa'});
+  const plan = window.runOnePlan || {};
+  window.runOneRuns[creatorId] = {
+    runId:'run_test_1', creatorId:creatorId, handle:creator.handle,
+    status: plan.ok === false ? 'failed' : 'done', stage: plan.stage || 'done',
+    stageLabel:'完成', finishedAt:Date.now()/1000,
+    steps:[{stage:'checking',label:'检查 Creator 新内容',state:'done'},
+           {stage:'discovered',label:'发现最新内容',state:'done'},
+           {stage:'downloading',label:'下载',state:'done'},
+           {stage:'downloaded',label:'下载完成',state:'done'},
+           {stage:'transcribing',label:'读取字幕 / 本机 ASR',state:'done'},
+           {stage:'enriching',label:'AI 标注',state:'done'},
+           {stage:'done',label:'完成',state:'done'}],
+    error: plan.ok === false ? (plan.error || '失败') : '',
+    result: Object.assign({ok:plan.ok !== false, creatorId:creatorId, handle:creator.handle,
+                           processed:plan.processed===undefined?1:plan.processed,
+                           stage:plan.stage||'done', message:plan.message||'',
+                           itemId:plan.itemId||'', error:plan.error||''}, plan),
+  };
+};
+window.currentRun = ()=>Object.values(window.runOneRuns)[0] || null;
 const factory = {
   content_stats: async()=>({ok:true, counts:{total:2, enriched:1, pending:0, running:0,
       failed:1, transcribed:1, downloaded:2, creators:2}}),
@@ -229,6 +254,19 @@ const factory = {
   content_creator_toggle: async(id, enabled)=>{
     window.calls.push({name:'content_creator_toggle', id:id, enabled:enabled});
     return {ok:true, enabled:enabled!==false};
+  },
+  // 「立即跑 1 条」：默认直接给一个已完成的 run（界面轮询一次就能拿到结果）。
+  // 真实后端是后台线程 + 进度状态，这里保留同样的字段形状，界面代码不用分叉。
+  content_run_one_creator: async(creatorId)=>{
+    window.calls.push({name:'content_run_one_creator', creatorId:creatorId});
+    if (!window.runOneStarted) return {ok:false, error:'测试里没有配置这个 run'};
+    window.runOneStarted(creatorId);
+    return {ok:true, started:true, runId:window.currentRun().runId, creatorId:creatorId,
+            handle:window.currentRun().handle, stage:'checking'};
+  },
+  content_run_one_status: async(runId, creatorId)=>{
+    window.calls.push({name:'content_run_one_status', runId:runId, creatorId:creatorId});
+    return {ok:true, run:window.currentRun()};
   },
   content_topic_distribution: async()=>({ok:true, topics:[]}),
   content_settings: async()=>({ok:true}),
@@ -624,6 +662,95 @@ class CreatorMonitorTests(ShellUITestCase):
         self.assertEqual(
             self.page.evaluate("window.calls.filter(c=>c.name==='content_creator_list').length") > 0,
             True, "创作者监控页必须从 content_creator_list() 取数据")
+
+
+class RunOneCreatorTests(ShellUITestCase):
+    """「立即跑 1 条」：一个 Creator 的一条新内容跑到底的用户入口。"""
+
+    def run_button(self):
+        self.nav("creators")
+        return self.page.locator('[data-act="creator-run-one"]').first
+
+    def test_every_creator_row_has_a_run_one_button(self):
+        self.nav("creators")
+        buttons = self.page.locator('[data-act="creator-run-one"]')
+        self.assertEqual(buttons.count(), 2, "每个 Creator 都要有「立即跑 1 条」")
+        self.assertEqual(buttons.first.inner_text().strip(), "立即跑 1 条")
+
+    def test_the_button_can_be_used_again_after_a_successful_run(self):
+        """跑完一次不能一直卡在「运行中…」——用户要能接着跑第二条。"""
+        self.run_button().click()
+        self.page.wait_for_function(
+            "() => (document.getElementById('toasts').innerText || '').includes('查看 AI 结果')",
+            timeout=15000)
+        row = self.page.locator("#content tr", has_text="@techwithtim").first
+        button = row.locator('[data-act="creator-run-one"]')
+        self.assertEqual(button.inner_text().strip(), "再跑 1 条")
+        self.assertFalse(button.is_disabled(), "跑完之后必须还能再点")
+        button.click()
+        self.page.wait_for_timeout(600)
+        self.assertEqual(self.page.evaluate(
+            "window.calls.filter(c=>c.name==='content_run_one_creator').length"), 2,
+            "第二次点击要真的再跑一次")
+
+    def test_success_shows_the_result_and_offers_a_jump_to_the_ai_result(self):
+        button = self.run_button()
+        button.click()
+        self.page.wait_for_function(
+            "() => (document.getElementById('toasts').innerText || '').includes('查看 AI 结果')",
+            timeout=15000)
+        call = self.page.evaluate("window.calls.find(c=>c.name==='content_run_one_creator')")
+        self.assertIsNotNone(call, "按钮必须调用 content_run_one_creator")
+        self.assertEqual(call["creatorId"], "c1")
+        self.assertTrue(self.page.evaluate(
+            "window.calls.some(c=>c.name==='content_run_one_status')"),
+            "必须轮询 content_run_one_status，用户要能看到到哪一步了")
+        toasts = self.page.locator("#toasts").inner_text()
+        self.assertIn("@techwithtim 的 1 条内容已处理完成", toasts)
+
+        # 行内步骤条：检查 / 发现 / 下载 / 字幕 / AI 都要走完
+        row = self.page.locator("#content tr", has_text="@techwithtim").first
+        self.assertIn("已处理完成", row.inner_text())
+
+        # 「查看 AI 结果」跳到 AI 加工页
+        self.page.locator('[data-act="toast-link"]').first.click()
+        self.page.wait_for_timeout(250)
+        self.assertEqual(self.page.evaluate("location.hash"), "#/ai")
+        self.assertIn("AI 加工", self.heading())
+
+    def test_failure_names_the_layer_that_failed(self):
+        self.page.evaluate("""window.runOnePlan = {ok:false, processed:0, stage:'download',
+          error:'下载失败：网络请求超时'}""")
+        self.run_button().click()
+        self.page.wait_for_function(
+            "() => (document.getElementById('toasts').innerText || '').includes('下载失败')",
+            timeout=15000)
+        text = self.page.locator("#toasts").inner_text()
+        self.assertIn("下载失败：网络请求超时", text)
+        self.assertIn("下载", text, "失败提示要说清是哪一层")
+
+    def test_preflight_failure_is_shown_immediately_without_starting_a_run(self):
+        """没配下载目录时，点按钮要当场报错，不能起一个必然失败的 run。"""
+        self.page.evaluate("""window.pywebview.api.content_factory.content_run_one_creator =
+          async()=>({ok:false, started:false, stage:'preflight', needsFolder:true,
+                     error:'未配置下载目录：请在「设置 → 存储设置」里填写保存路径'})""")
+        self.run_button().click()
+        self.page.wait_for_function(
+            "() => (document.getElementById('toasts').innerText || '').includes('下载目录')",
+            timeout=10000)
+        self.assertIn("存储设置", self.page.locator("#toasts").inner_text())
+        self.assertEqual(self.page.evaluate(
+            "window.calls.filter(c=>c.name==='content_run_one_status').length"), 0,
+            "前置检查失败就不该去轮询进度")
+
+    def test_no_new_content_is_reported_as_information_not_as_failure(self):
+        self.page.evaluate("""window.runOnePlan = {ok:true, processed:0, stage:'no_content',
+          message:'没有发现新的可处理内容（主页读到 5 条，都已在内容库或采集队列里）'}""")
+        self.run_button().click()
+        self.page.wait_for_function(
+            "() => (document.getElementById('toasts').innerText || '').includes('没有发现新的可处理内容')",
+            timeout=15000)
+        self.assertIn("没有发现新的可处理内容", self.page.locator("#toasts").inner_text())
 
 
 class DegradedModeTests(unittest.TestCase):

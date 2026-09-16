@@ -501,7 +501,9 @@ select { cursor: pointer; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 18px; border-top: 1px solid var(--line); position: sticky; bottom: 0; background: #fff; }
 
 /* ---------- 吐司 ---------- */
-.toasts { position: fixed; right: 18px; bottom: 18px; z-index: 120; display: flex; flex-direction: column; gap: 9px; pointer-events: none; }
+.toasts { position: fixed; right: 18px; bottom: 18px; z-index: 120; display: flex; flex-direction: column; gap: 9px; }
+/* 容器不吃事件（否则右下角会挡住下面的按钮），但 toast 自己有按钮时必须能点 */
+.toasts > .toast { pointer-events: auto; }
 .toast {
   min-width: 210px; max-width: 360px;
   background: #1f2937; color: #fff;

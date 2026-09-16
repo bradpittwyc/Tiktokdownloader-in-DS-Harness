@@ -34,6 +34,7 @@ const state = {
   prompts: { current: '', list: [], versions: {}, notes: {} },
   pipeline: { filter: 'all', search: '' },
   libraryLoaded: false,
+  runs: {},                       // creatorId -> 「立即跑 1 条」的运行状态
 };
 
 /* 检查频率档位：与 content_factory/creator_monitor/intervals.py 的
@@ -128,6 +129,23 @@ function toast(message, kind = '') {
   node.textContent = String(message);
   box.appendChild(node);
   setTimeout(() => node.remove(), kind === 'bad' ? 6200 : 3600);
+}
+
+/** 带按钮的 toast：「立即跑 1 条」成功后要能一键跳到 AI 加工页看结果。
+ * pywebview 里 window.open 不一定可用，所以用页面内跳转（hash 路由）。 */
+function toastAction(message, label, page, kind = 'good') {
+  const box = $('toasts');
+  if (!box) {
+    toast(message, kind);
+    return;
+  }
+  const node = document.createElement('div');
+  node.className = `toast ${kind}`;
+  node.innerHTML = `<span>${esc(message)}</span>
+    <button class="btn sm" data-act="toast-link" data-page="${esc(page)}"
+      style="margin-left:8px">${esc(label)}</button>`;
+  box.appendChild(node);
+  setTimeout(() => node.remove(), 9000);
 }
 
 function tag(text, kind = '') {
@@ -407,6 +425,53 @@ function nextCheckText(creator) {
   return `${Math.round(seconds / 86400)} 天后`;
 }
 
+/* 「立即跑 1 条」的运行状态（来自 content_run_one_status）。
+ * 只显示后端真的报出来的那一步，不再编一套进度。 */
+const RUN_STEPS = [
+  ['checking', '检查 Creator 新内容'],
+  ['discovered', '发现最新内容'],
+  ['downloading', '下载'],
+  ['transcribing', '字幕 / ASR'],
+  ['enriching', 'AI 标注'],
+  ['done', '完成'],
+];
+
+function creatorRunState(creator) {
+  const run = state.runs[creator.id];
+  if (!run) return { run: null, busy: false, finished: false, processed: false };
+  const finished = run.status === 'done' || run.status === 'failed';
+  const processed = finished && !!(run.result && run.result.ok && run.result.processed);
+  return { run, finished, busy: !finished, processed };
+}
+
+/** 按钮文案：跑完一次之后要能接着跑第二条，不能一直卡在「运行中…」。 */
+function runButtonLabel(run) {
+  if (run.busy) return '运行中…';
+  if (run.processed) return '再跑 1 条';
+  return '立即跑 1 条';
+}
+
+/** 行内的步骤条：运行中显示「到哪一步了」，失败显示「卡在哪一层」。 */
+function creatorRunStatus(creator) {
+  const { run, finished } = creatorRunState(creator);
+  if (!run) return '';
+  const current = String(run.stage || '');
+  const reached = new Set((run.steps || []).map((step) => step.stage));
+  const steps = RUN_STEPS.map(([stage, label]) => {
+    const done = reached.has(stage) || (finished && run.result && run.result.ok);
+    const active = !finished && stage === current;
+    const tone = active ? 'run' : done ? 'done' : 'skip';
+    return `<span class="step ${tone}" title="${esc(label)}">${done ? '✓' : active ? '·' : ''}</span>`;
+  }).join('');
+  const line = finished
+    ? (run.result && run.result.ok === false
+      ? `<span class="tiny" style="color:var(--red)">${esc(run.error || '失败')}</span>`
+      : `<span class="tiny" style="color:var(--green)">${esc((run.result && run.result.message) || '完成')}</span>`)
+    : `<span class="tiny muted">${esc(run.stageLabel || '运行中')}…</span>`;
+  return `<div style="margin-top:6px" title="${esc(run.stageLabel || '')}">
+      <div class="steps">${steps}</div>${line}</div>`;
+}
+
 function renderTopbar() {
   const counts = state.stats.counts || {};
   const running = counts.running || 0;
@@ -551,7 +616,9 @@ renderers.creators = (meta) => {
 
   const table = creators.length ? `<div class="table-scroll"><table class="table">
       <thead><tr><th>创作者</th><th>分类</th><th>优先级</th><th>检查频率</th><th>下次检查</th><th>内容数</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody>${creators.map((creator) => `<tr>
+      <tbody>${creators.map((creator) => {
+        const run = creatorRunState(creator);
+        return `<tr>
         <td><div class="video-cell">${avatar(creator.handle)}
           <div class="video-meta"><b>@${esc(creator.handle)}</b>
           <span>${esc(creator.display_name || '')}</span></div></div></td>
@@ -562,11 +629,14 @@ renderers.creators = (meta) => {
         <td class="num">${num(creator.item_count || 0)}</td>
         <td>${creatorStateTag(creator)}</td>
         <td><div class="flex">
+          <button class="btn sm primary" data-act="creator-run-one" data-id="${esc(creator.id)}"
+            data-handle="${esc(creator.handle)}" ${run.busy ? 'disabled' : ''}>${runButtonLabel(run)}</button>
           <button class="btn sm" data-act="creator-toggle" data-id="${esc(creator.id)}"
             data-enabled="${creator.enabled === false ? '1' : '0'}">${creator.enabled === false ? '启用' : '暂停'}</button>
           <button class="btn sm" data-act="open-creator" data-handle="${esc(creator.handle)}">查看内容</button>
-        </div></td>
-      </tr>`).join('')}</tbody></table></div>`
+        </div>${creatorRunStatus(creator)}</td>
+      </tr>`;
+      }).join('')}</tbody></table></div>`
     : emptyBox('👤', '还没有监控中的创作者', '添加一个 TikTok 创作者，系统会按你设的频率自动检查更新。',
       '<button class="btn primary" data-act="creator-add">＋ 添加创作者</button>');
 
@@ -1794,6 +1864,58 @@ async function refreshCreators() {
   return true;
 }
 
+/** 轮询「立即跑 1 条」的进度，直到它结束。
+ *
+ * 状态来自 content_run_one_status（后端每次状态变化都会写），不是前端猜的 ——
+ * 所以「检查 / 发现 / 下载 / 字幕 / AI」每一步都是真实发生的，卡住时也停在
+ * 真实的那一步上。结束时会重新拉一次内容库，这样「查看 AI 结果」跳过去就能看到。
+ */
+function pollCreatorRun(creatorId, handle, runId, attempt = 0) {
+  const timer = setInterval(async () => {
+    attempt += 1;
+    const payload = await safeCall('content_run_one_status', runId, creatorId);
+    const run = payload && payload.ok ? payload.run : null;
+    if (!run) {
+      if (attempt > 400) clearInterval(timer);
+      return;
+    }
+    state.runs[creatorId] = run;
+    renderPage();
+    if (run.status === 'done' || run.status === 'failed') {
+      clearInterval(timer);
+      await finishCreatorRun(creatorId, handle, run);
+      return;
+    }
+    if (attempt > 900) {                    // 兜底：15 分钟还没结束就别再轮询了
+      clearInterval(timer);
+      state.runs[creatorId] = { ...run, status: 'failed', error: '运行超时，请查看采集与内容库状态' };
+      renderPage();
+    }
+  }, 1500);
+}
+
+async function finishCreatorRun(creatorId, handle, run) {
+  const result = run.result || {};
+  await reloadAll({ render: false });       // 让 AI 加工页立刻能看到这条内容
+  renderPage();
+  if (run.status === 'failed' || result.ok === false) {
+    // 失败必须说清楚卡在哪一层：preflight / check / download / library / transcript / enrich
+    const stageLabel = ({ preflight: '前置检查', check: '读取创作者主页', download: '下载',
+      library: '内容入库', transcript: '字幕 / 转写', enrich: 'AI 标注' })[result.stage] || '运行';
+    toast(`${stageLabel}失败：${result.error || run.error || '未知原因'}`, 'bad');
+    return;
+  }
+  if (result.processed === 0) {
+    toast(result.message || '没有发现新的可处理内容', 'warn');
+    return;
+  }
+  toastAction(`@${handle} 的 1 条内容已处理完成`, '查看 AI 结果', 'ai');
+  if (result.itemId) {
+    state.ai.selected = result.itemId;
+    state.ai.status = 'all';
+  }
+}
+
 /** 取 Prompt 版本清单（只在设置页用得到，但启动时取一次最省事）。 */
 async function loadPrompts() {
   const payload = await safeCall('content_prompts');
@@ -1910,6 +2032,31 @@ const HANDLERS = {
       await refreshCreators();
       renderPage();
     }
+  },
+
+  /* ---- 「立即跑 1 条」：一个 Creator 的一条新内容跑到底 ---- */
+  async 'creator-run-one'(node) {
+    const creatorId = node.dataset.id;
+    const handle = node.dataset.handle || '';
+    const result = await safeCall('content_run_one_creator', creatorId);
+    if (!result || !result.ok) {
+      // 起线程之前就查出来的问题（没配下载目录 / 已暂停 / Creator 不存在）
+      // 必须当场说清楚，不能等后台线程悄悄失败。
+      toast((result && result.error) || '无法开始运行', 'bad');
+      return;
+    }
+    state.runs[creatorId] = {
+      runId: result.runId || '', creatorId, handle, status: 'running',
+      stage: 'checking', stageLabel: '检查 Creator 新内容', steps: [], result: null,
+    };
+    renderPage();
+    pollCreatorRun(creatorId, handle, result.runId || '');
+  },
+
+  'toast-link'(node) {
+    if (node.dataset.page) go(node.dataset.page);
+    const toastNode = node.closest('.toast');
+    if (toastNode) toastNode.remove();
   },
   'publish-guard'() { toast('云端发布本阶段只有界面，真实发布逻辑留到下一阶段', 'warn'); },
   reload: async () => { await reloadAll(); toast('已刷新', 'good'); },

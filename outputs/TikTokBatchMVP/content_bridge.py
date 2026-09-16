@@ -205,6 +205,12 @@ class ContentFactoryApi:
     def content_creator_check_now(self, creator_id, background=True):
         return self._collector.content_creator_check_now(creator_id, background)
 
+    def content_run_one_creator(self, creator_id, background=True):
+        return self._collector.content_run_one_creator(creator_id, background)
+
+    def content_run_one_status(self, run_id="", creator_id=""):
+        return self._collector.content_run_one_status(run_id=run_id, creator_id=creator_id)
+
     def content_errors(self, limit=40):
         return errors_feed.recent_errors(store=self._store, limit=int(limit or 40))
 

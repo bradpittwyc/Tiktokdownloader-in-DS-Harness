@@ -35,6 +35,11 @@ EXPECTED = {
     "content_ingest_videos", "content_import_folder", "content_register_download",
     "content_ingest_downloader", "content_seed_demo", "content_clear_demo",
     "content_worker_status", "content_events",
+    # 创作者监控 / 单条闭环（RC1）
+    "content_creator_list", "content_creator_save", "content_creator_delete",
+    "content_creator_toggle", "content_creator_set_interval",
+    "content_creator_set_priority", "content_creator_check_now",
+    "content_run_one_creator", "content_run_one_status",
 }
 
 
