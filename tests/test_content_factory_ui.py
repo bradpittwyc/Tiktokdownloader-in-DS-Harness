@@ -138,6 +138,19 @@ SETTINGS = {
 BRIDGE = """
 window.calls = [];
 window.savedSettings = null;
+// 创作者监控：假桥接要能被「添加」改变，否则测不出「保存后列表刷新」。
+// 字段形态与真实 content_creator_list() 一致（含 enabled / is_due / checking 等监控状态）。
+window.creators = [
+  {id:'c1', handle:'techwithtim', display_name:'Tim', category:'AI 科技',
+   status:'active', priority:'高', poll_interval:'1 小时', item_count:1,
+   enabled:true, poll_interval_seconds:3600, last_state:'', checking:false,
+   is_due:false, due_in_seconds:1200, next_check_at:'2026-01-15 15:00:00'},
+  {id:'c2', handle:'moonvy', display_name:'Moonvy', category:'设计', status:'error',
+   priority:'中', poll_interval:'30 分钟', item_count:1,
+   enabled:true, poll_interval_seconds:1800, last_state:'failed', checking:false,
+   is_due:true, due_in_seconds:0, next_check_at:''},
+];
+window.creatorStats = {total:2, enabled:2, disabled:0, due:1, checking:0};
 const factory = {
   content_stats: async()=>({ok:true, counts:{total:2, enriched:1, pending:0, running:0,
       failed:1, transcribed:1, downloaded:2, creators:2}}),
@@ -147,10 +160,7 @@ const factory = {
       transcribed:1, downloaded:2, creators:2}, topicDistribution:[], aiConfigured:true,
       model:'deepseek-chat', provider:'DeepSeek', asrAvailable:false, dbPath:'C:/db.sqlite'},
     items: __ITEMS__,
-    creators:[{id:'c1', handle:'techwithtim', display_name:'Tim', category:'AI 科技',
-      status:'active', priority:'高', poll_interval:'1 小时', item_count:1},
-      {id:'c2', handle:'moonvy', display_name:'Moonvy', category:'设计', status:'error',
-      priority:'中', poll_interval:'30 分钟', item_count:1}],
+    creators:window.creators,
     settings: __SETTINGS__,
     errors:{ok:true, logExists:true, logPath:'C:/logs/scrape.log',
       summary:{total:2, retryable:1, pending:2, fromLog:1, fromStore:1},
@@ -188,7 +198,38 @@ const factory = {
   content_errors: async()=>({ok:true, entries:[], summary:{}, logExists:false}),
   content_item: async(id)=>({ok:true, item:null}),
   content_items: async()=>({ok:true, items:[]}),
-  content_creators: async()=>({ok:true, creators:[]}),
+  content_creators: async()=>({ok:true, creators:window.creators}),
+  // 创作者监控页的真实数据源（Creator Monitor）。语义与后端一致：
+  // 空 handle / 非法 handle / 重复 handle 都返回 ok:false + 真实 error。
+  content_creator_list: async()=>{
+    window.calls.push({name:'content_creator_list'});
+    return {ok:true, creators:window.creators, stats:window.creatorStats};
+  },
+  content_creator_save: async(values)=>{
+    window.calls.push({name:'content_creator_save', values:values});
+    const raw = String((values&&values.handle)||'').trim();
+    const handle = raw.replace(/^@+/, '');
+    if (!handle) return {ok:false, error:'handle 不能为空'};
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(handle)) {
+      return {ok:false, error:'handle 不合法：'+handle+'（只允许字母、数字、. _ -）'};
+    }
+    if (window.creators.some(c=>c.handle.toLowerCase()===handle.toLowerCase())) {
+      return {ok:false, duplicate:true, error:'创作者 @'+handle+' 已存在'};
+    }
+    const creator = {id:'creator_'+(window.creators.length+1), handle:handle,
+      display_name:(values&&values.display_name)||handle, category:(values&&values.category)||'',
+      status:'active', priority:(values&&values.priority)||'中',
+      poll_interval:(values&&values.poll_interval)||'1 小时', item_count:0,
+      enabled:(values&&values.enabled)===false?false:true, poll_interval_seconds:1800,
+      last_state:'', checking:false, is_due:true, due_in_seconds:0, next_check_at:''};
+    window.creators = window.creators.concat([creator]);
+    window.creatorStats = Object.assign({}, window.creatorStats, {total:window.creators.length});
+    return {ok:true, created:true, creatorId:creator.id, creator:creator, creators:window.creators};
+  },
+  content_creator_toggle: async(id, enabled)=>{
+    window.calls.push({name:'content_creator_toggle', id:id, enabled:enabled});
+    return {ok:true, enabled:enabled!==false};
+  },
   content_topic_distribution: async()=>({ok:true, topics:[]}),
   content_settings: async()=>({ok:true}),
   content_reset_settings: async()=>({ok:true, settings:window.settingsView || {}}),
@@ -493,6 +534,96 @@ class LibraryTests(ShellUITestCase):
         frame = self.page.frame_locator("#libraryFrame")
         frame.locator("#url").wait_for(timeout=8000)
         self.assertTrue(frame.locator("#recognize").is_visible(), "内嵌的下载器必须完整可用")
+
+
+class CreatorMonitorTests(ShellUITestCase):
+    """创作者监控页：真正能添加创作者（回归 bug：按钮以前只是跳视频库）。"""
+
+    def open_form(self):
+        self.nav("creators")
+        self.page.locator('[data-act="creator-add"]').first.click()
+        self.page.wait_for_selector("#creatorHandle")
+
+    def test_add_button_opens_the_creator_modal_instead_of_jumping_to_library(self):
+        self.nav("creators")
+        button = self.page.locator('[data-act="creator-add"]').first
+        self.assertNotEqual((button.get_attribute("data-act") or ""), "nav",
+                            "「＋ 添加创作者」不能再是跳转视频库的导航按钮")
+        button.click()
+        self.page.wait_for_selector(".modal")
+        self.assertIn("添加创作者", self.page.locator(".modal").inner_text())
+        self.assertTrue(self.page.locator("#creatorHandle").is_visible())
+        self.assertEqual(self.page.evaluate("location.hash"), "#/creators",
+                         "点添加创作者不应该离开创作者监控页")
+
+    def test_modal_submits_the_creator_and_refreshes_the_list(self):
+        self.open_form()
+        self.page.fill("#creatorHandle", "@nasa")
+        self.page.fill("#creatorName", "NASA")
+        self.page.select_option("#creatorPriority", "高")
+        self.page.locator('[data-act="creator-save"]').click()
+        self.page.wait_for_timeout(250)
+
+        call = self.page.evaluate("window.calls.find(c=>c.name==='content_creator_save')")
+        self.assertIsNotNone(call, "保存必须调用 content_creator_save")
+        self.assertEqual(call["values"]["handle"], "nasa", "保存时要统一去掉 @")
+        self.assertEqual(call["values"]["display_name"], "NASA")
+        self.assertEqual(call["values"]["priority"], "高")
+        self.assertTrue(call["values"]["enabled"])
+        self.assertEqual(self.page.locator(".modal").count(), 0, "保存成功后要关闭 modal")
+        self.assertIn("@nasa", self.page.locator("#content").inner_text(),
+                      "保存成功后要重新拉列表并渲染出 @nasa")
+        self.assertIn("已添加 @nasa", self.page.locator("#toasts").inner_text())
+
+    def test_empty_handle_is_reported_and_nothing_is_saved(self):
+        self.open_form()
+        self.page.locator('[data-act="creator-save"]').click()
+        self.page.wait_for_timeout(200)
+        self.assertTrue(self.page.locator(".modal").is_visible(), "失败时 modal 要留着")
+        self.assertIn("Handle", self.page.locator("#creatorFormMsg").inner_text())
+        self.assertEqual(
+            self.page.evaluate("window.calls.filter(c=>c.name==='content_creator_save').length"), 0,
+            "空 handle 不该发到桥接")
+
+    def test_invalid_handle_shows_the_real_error_and_keeps_the_modal(self):
+        self.open_form()
+        self.page.fill("#creatorHandle", "bad handle!")
+        self.page.locator('[data-act="creator-save"]').click()
+        self.page.wait_for_timeout(250)
+        self.assertTrue(self.page.locator(".modal").is_visible(), "失败时不能关 modal")
+        self.assertIn("handle 不合法", self.page.locator("#creatorFormMsg").inner_text())
+        self.assertNotIn("@bad handle!", self.page.locator("#content").inner_text())
+
+    def test_duplicate_creator_is_reported_and_not_added_twice(self):
+        self.open_form()
+        self.page.fill("#creatorHandle", "techwithtim")
+        self.page.locator('[data-act="creator-save"]').click()
+        self.page.wait_for_timeout(250)
+        self.assertTrue(self.page.locator(".modal").is_visible())
+        self.assertIn("已存在", self.page.locator("#creatorFormMsg").inner_text())
+        self.assertEqual(
+            self.page.evaluate("window.creators.filter(c=>c.handle==='techwithtim').length"), 1,
+            "重复添加不能产生第二条记录")
+
+    def test_bare_handle_without_at_is_accepted(self):
+        self.open_form()
+        self.page.fill("#creatorHandle", "nasa")
+        self.page.locator('[data-act="creator-save"]').click()
+        self.page.wait_for_timeout(250)
+        call = self.page.evaluate("window.calls.find(c=>c.name==='content_creator_save')")
+        self.assertEqual(call["values"]["handle"], "nasa")
+
+    def test_registered_creators_show_their_monitor_state(self):
+        """列表来自 content_creator_list()：状态与下次检查时间是监控器算出来的。"""
+        self.nav("creators")
+        text = self.page.locator("#content").inner_text()
+        self.assertIn("@techwithtim", text)
+        self.assertIn("20 分钟后", text, "下次检查要按 due_in_seconds 显示")
+        self.assertIn("即将检查", text, "已到点的创作者要显示即将检查")
+        self.assertIn("异常", text, "上次检查失败的创作者要显示异常")
+        self.assertEqual(
+            self.page.evaluate("window.calls.filter(c=>c.name==='content_creator_list').length") > 0,
+            True, "创作者监控页必须从 content_creator_list() 取数据")
 
 
 class DegradedModeTests(unittest.TestCase):

@@ -9,6 +9,7 @@
  *
  * 数据来源说明（页面里哪些是真数据、哪些是示意）：
  *   真实：首页统计 / 内容流水线 / AI 加工 / 异常处理 / 设置（本地持久化）
+ *   真实：创作者监控的创作者列表与监控状态（来自 content_creator_list()）
  *   示意：创作者监控的规则面板、自动采集的规则、云端发布全页
  * 需要真实数据的页面统一从 state.items / state.creators / state.stats 取，
  * 所以等真实下载与分析跑起来之后，这些页面不用改结构就会变成真数据。
@@ -34,6 +35,12 @@ const state = {
   pipeline: { filter: 'all', search: '' },
   libraryLoaded: false,
 };
+
+/* 检查频率档位：与 content_factory/creator_monitor/intervals.py 的
+ * INTERVAL_CHOICES 完全一致（界面填的是中文文本，库里解析成秒）。
+ * 这里镜像一份而不是新增桥接接口 —— 本阶段只修「添加创作者」，
+ * 不为一个下拉框扩张对外契约。 */
+const CREATOR_INTERVALS = ['15 分钟', '30 分钟', '1 小时', '2 小时', '6 小时', '12 小时', '24 小时'];
 
 /** 等 pywebview 注入完成；拿不到桥接时给一份明确说明（而不是一直转圈）。
  *
@@ -241,6 +248,60 @@ function closeModal() {
   host.classList.add('hidden');
 }
 
+/* ---------- 添加创作者表单（Modal）----------
+ * 「添加创作者」以前是一个 data-act="nav" 的跳转按钮，点了只是打开视频库，
+ * 真正的 Creator 新增流程根本不存在。这里把它补成最小表单：只收集
+ * content_creator_save(values) 需要的字段，其余（头像 / 粉丝数等）由采集回填。
+ */
+function creatorAddForm() {
+  return `
+    <div id="creatorFormMsg"></div>
+    <div class="field"><label class="lb">TikTok Handle</label>
+      <div class="ctl"><input type="text" id="creatorHandle" placeholder="@username 或 username" autocomplete="off">
+        <span class="hint">必填。可以带 @，保存时会自动去掉</span></div></div>
+    <div class="field"><label class="lb">显示名称</label>
+      <div class="ctl"><input type="text" id="creatorName" placeholder="留空则用 handle" autocomplete="off"></div></div>
+    <div class="field"><label class="lb">分类</label>
+      <div class="ctl"><input type="text" id="creatorCategory" placeholder="例如：AI 科技" autocomplete="off"></div></div>
+    <div class="field"><label class="lb">优先级</label>
+      <div class="ctl"><select id="creatorPriority">
+        ${['高', '中', '低'].map((value, index) => `<option value="${value}" ${index === 1 ? 'selected' : ''}>${value}</option>`).join('')}
+      </select><span class="hint">高优先级的创作者会被先检查</span></div></div>
+    <div class="field"><label class="lb">检查频率</label>
+      <div class="ctl"><select id="creatorInterval">
+        ${CREATOR_INTERVALS.map((value, index) => `<option value="${value}" ${index === 1 ? 'selected' : ''}>${value}</option>`).join('')}
+      </select></div></div>
+    <div class="field"><label class="lb">启用监控</label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="creatorEnabled" checked><i></i></label>
+        <span class="hint">关闭后只登记创作者，不自动检查更新</span></div></div>`;
+}
+
+function openCreatorModal() {
+  openModal(modal('添加创作者', creatorAddForm(),
+    '<button class="btn" data-act="close-modal">取消</button>'
+    + '<button class="btn primary" data-act="creator-save">保存</button>'));
+  const box = $('creatorHandle');
+  if (box) box.focus();
+}
+
+/** 读表单 -> 交给 content_creator_save。字段名用服务层认得的那些（handle /
+ * display_name / category / priority / poll_interval / enabled）。 */
+function creatorFormValues() {
+  const value = (id) => {
+    const node = $(id);
+    return node ? String(node.value || '').trim() : '';
+  };
+  const enabled = $('creatorEnabled');
+  return {
+    handle: value('creatorHandle'),
+    display_name: value('creatorName'),
+    category: value('creatorCategory'),
+    priority: value('creatorPriority') || '中',
+    poll_interval: value('creatorInterval') || '1 小时',
+    enabled: enabled ? enabled.checked : true,
+  };
+}
+
 /* ==================== 3. 路由与外壳 ==================== */
 
 const NAV = [
@@ -311,6 +372,39 @@ function pageHead(meta, actions = '') {
     <div><h1>${esc(meta.title)}</h1><p>${esc(meta.sub)}</p></div>
     ${actions ? `<div class="ph-actions">${actions}</div>` : ''}
   </header>`;
+}
+
+/** 把真实错误显示在 modal 里（而不是一个会自动消失的 toast）。 */
+function showCreatorError(message) {
+  const box = $('creatorFormMsg');
+  if (!box) {
+    toast(message, 'bad');
+    return;
+  }
+  box.innerHTML = `<div class="notice bad mb8"><span>⚠</span><div>${esc(message)}</div></div>`;
+}
+
+/* 创作者监控状态：只认 content_creator_list() 给的监控字段（enabled / checking /
+ * last_state / due_in_seconds / next_check_at）。不另造一套数据模型 —— 这些字段
+ * 是 Collector Core 的 Creator Monitor 真算出来的，前端只负责显示。 */
+function creatorStateTag(creator) {
+  if (creator.enabled === false) return tag('已暂停', '');
+  if (creator.checking) return tag('检查中', 'blue');
+  if (creator.last_state === 'failed' || creator.status === 'error') return tag('异常', 'red');
+  if (creator.last_state === 'partial') return tag('部分成功', 'amber');
+  return tag('正常监控', 'green');
+}
+
+/** 下次检查时间：到点了就说「即将检查」，比显示一个已经过去的时间点清楚。 */
+function nextCheckText(creator) {
+  if (creator.enabled === false) return '<span class="muted">已暂停</span>';
+  if (creator.checking) return '<span class="muted">检查中…</span>';
+  if (creator.is_due) return tag('即将检查', 'blue');
+  const seconds = Number(creator.due_in_seconds || 0);
+  if (!seconds) return '<span class="muted">—</span>';
+  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} 分钟后`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时后`;
+  return `${Math.round(seconds / 86400)} 天后`;
 }
 
 function renderTopbar() {
@@ -456,7 +550,7 @@ renderers.creators = (meta) => {
   </div>`;
 
   const table = creators.length ? `<div class="table-scroll"><table class="table">
-      <thead><tr><th>创作者</th><th>分类</th><th>优先级</th><th>检查频率</th><th>内容数</th><th>状态</th><th>操作</th></tr></thead>
+      <thead><tr><th>创作者</th><th>分类</th><th>优先级</th><th>检查频率</th><th>下次检查</th><th>内容数</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>${creators.map((creator) => `<tr>
         <td><div class="video-cell">${avatar(creator.handle)}
           <div class="video-meta"><b>@${esc(creator.handle)}</b>
@@ -464,12 +558,17 @@ renderers.creators = (meta) => {
         <td>${creator.category ? tag(creator.category, 'blue') : '<span class="muted">—</span>'}</td>
         <td>${tag(creator.priority || '中', creator.priority === '高' ? 'amber' : '')}</td>
         <td>${esc(creator.poll_interval || '30 分钟')}</td>
+        <td>${nextCheckText(creator)}</td>
         <td class="num">${num(creator.item_count || 0)}</td>
-        <td>${creator.status === 'error' ? tag('异常', 'red') : tag('正常监控', 'green')}</td>
-        <td><button class="btn sm" data-act="open-creator" data-handle="${esc(creator.handle)}">查看内容</button></td>
+        <td>${creatorStateTag(creator)}</td>
+        <td><div class="flex">
+          <button class="btn sm" data-act="creator-toggle" data-id="${esc(creator.id)}"
+            data-enabled="${creator.enabled === false ? '1' : '0'}">${creator.enabled === false ? '启用' : '暂停'}</button>
+          <button class="btn sm" data-act="open-creator" data-handle="${esc(creator.handle)}">查看内容</button>
+        </div></td>
       </tr>`).join('')}</tbody></table></div>`
-    : emptyBox('👤', '还没有监控中的创作者', '去「视频库」抓取一个博主，作品会带着作者信息进入内容库。',
-      '<button class="btn primary" data-act="nav" data-page="library">打开视频库</button>');
+    : emptyBox('👤', '还没有监控中的创作者', '添加一个 TikTok 创作者，系统会按你设的频率自动检查更新。',
+      '<button class="btn primary" data-act="creator-add">＋ 添加创作者</button>');
 
   const rulesCard = card('监控规则', '示意配置（真实生效规则在「设置 → 采集设置」）',
     `<div class="card-body tight">${rules.map(([name, desc]) => `
@@ -507,7 +606,7 @@ renderers.creators = (meta) => {
       : '<div class="muted tiny">内容标注后这里会显示分类分布。</div>'}</div>`;
   })();
 
-  return pageHead(meta, `<button class="btn" data-act="nav" data-page="library">＋ 添加创作者</button>`)
+  return pageHead(meta, `<button class="btn primary" data-act="creator-add">＋ 添加创作者</button>`)
     + stats
     + `<div class="grid g-main mt14">
         ${card('监控中的创作者', `共 ${creators.length} 位`, table)}
@@ -1672,9 +1771,26 @@ async function reloadAll(options = {}) {
   state.demoCount = payload.demoCount || 0;
   const worker = await safeCall('content_worker_status');
   if (worker && worker.ok) state.worker = worker;
+  await refreshCreators();
   await loadPrompts();
   state.ready = true;
   if (options.render !== false) renderPage();
+  return true;
+}
+
+/** 创作者监控页的数据源：content_creator_list()。
+ *
+ * 为什么不再用 content_bootstrap 里的 creators：那一份只是 creators 表的基础字段，
+ * 没有「启用 / 优先级 / 检查频率 / 上次检查 / 下次检查 / 正在检查」这些监控状态，
+ * 页面上就没法显示真实状态（只能写死「正常监控」）。Creator Monitor 已经把这些
+ * 算好了，前端直接拿来显示即可，不再另造一份数据模型。
+ *
+ * 桥接上取不到时保留 bootstrap 的那一份（老桥接 / 降级），页面不至于空白。
+ */
+async function refreshCreators() {
+  const payload = await safeCall('content_creator_list');
+  if (!payload || !payload.ok) return false;
+  state.creators = payload.creators || [];
   return true;
 }
 
@@ -1745,6 +1861,55 @@ const HANDLERS = {
     state.ai.search = node.dataset.handle || '';
     state.ai.status = 'all';
     go('ai');
+  },
+
+  /* ---- 添加创作者：UI -> Bridge -> Collector.Core 的最后一跳 ---- */
+  'creator-add'() { openCreatorModal(); },
+
+  async 'creator-save'() {
+    const values = creatorFormValues();
+    if (!values.handle) {
+      showCreatorError('请填写 TikTok Handle（例如 @nasa）');
+      return;
+    }
+    // 先统一去掉 @：用户填 @nasa 和 nasa 都是同一个人，服务层也会再去一次，
+    // 这里去是为了成功提示里显示的和库里存的一致。
+    values.handle = values.handle.replace(/^@+/, '').trim();
+    if (!values.handle) {
+      showCreatorError('请填写 TikTok Handle（例如 @nasa）');
+      return;
+    }
+    const button = document.querySelector('[data-act="creator-save"]');
+    if (button) button.disabled = true;
+    let result;
+    try {
+      result = await call('content_creator_save', values);
+    } catch (error) {
+      showCreatorError(`保存失败：${error && error.message ? error.message : error}`);
+      return;
+    } finally {
+      if (button) button.disabled = false;
+    }
+    if (!result || !result.ok) {
+      // 失败必须留在 modal 里显示真实原因：handle 为空 / 不合法 / 已存在。
+      // 这里不用 safeCall 的自动 toast —— 用户要看着表单改，弹个会消失的提示没用。
+      showCreatorError((result && result.error) || '保存失败，请稍后重试');
+      return;
+    }
+    closeModal();
+    toast(`已添加 @${result.creator ? result.creator.handle : values.handle}`, 'good');
+    await refreshCreators();     // 重新拉一次 content_creator_list()
+    renderPage();
+  },
+
+  async 'creator-toggle'(node) {
+    const result = await safeCall('content_creator_toggle', node.dataset.id,
+      node.dataset.enabled === '1');
+    if (result && result.ok) {
+      toast(result.enabled ? '已启用监控' : '已暂停监控', 'good');
+      await refreshCreators();
+      renderPage();
+    }
   },
   'publish-guard'() { toast('云端发布本阶段只有界面，真实发布逻辑留到下一阶段', 'warn'); },
   reload: async () => { await reloadAll(); toast('已刷新', 'good'); },
@@ -1902,6 +2067,13 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && event.target.id === 'pipeSearch') {
     state.pipeline.search = event.target.value.trim();
     renderPage();
+  }
+  /* 添加创作者表单里按回车 = 保存（只会命中表单自己的输入框） */
+  if (event.key === 'Enter' && event.target.id
+      && event.target.id.indexOf('creator') === 0 && event.target.tagName === 'INPUT') {
+    event.preventDefault();
+    const handler = HANDLERS['creator-save'];
+    if (handler) Promise.resolve(handler(null, event)).catch((error) => toast(String(error), 'bad'));
   }
   if (event.key === 'Escape') closeModal();
 });

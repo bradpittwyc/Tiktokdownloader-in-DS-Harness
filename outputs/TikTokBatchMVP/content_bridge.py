@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from content_factory import errors_feed
+from content_factory.collector.bridge_api import CollectorApi
 from content_factory.factory_store import FactoryStore
 from content_factory.mock_data import clear_demo_items, seed_demo_items
 from content_factory.pipeline import ContentPipeline
@@ -85,6 +86,14 @@ class ContentFactoryApi:
         self.bridge_pipeline = _Hidden(ContentPipeline(
             unwrap(self.bridge_store), unwrap(self.bridge_settings),
             emit=self._record_event, downloader=downloader))
+        # 采集/创作者监控：复用同一个 store / settings / downloader / 事件出口。
+        # 这里**不能**另建一套 FactoryStore 或 FactorySettings —— 创作者写在
+        # creators 表里，两份 store 会指向同一个 sqlite 文件却各自缓存建表状态，
+        # 打开的是「两个世界」的内容库。downloader 同理：采集排队后的下载必须
+        # 落到界面上那个真实下载器，而不是另一个实例。
+        self.bridge_collector = _Hidden(CollectorApi(
+            store=unwrap(self.bridge_store), settings=unwrap(self.bridge_settings),
+            downloader=downloader, emit=self._record_event))
 
     # ---- 内部引用（属性名带下划线，pywebview 会跳过）-------------------
     @property
@@ -102,6 +111,10 @@ class ContentFactoryApi:
     @property
     def _pipeline(self):
         return unwrap(self.bridge_pipeline)
+
+    @property
+    def _collector(self):
+        return unwrap(self.bridge_collector)
 
     @property
     def _started_at(self):
@@ -163,6 +176,34 @@ class ContentFactoryApi:
 
     def content_creators(self):
         return {"ok": True, "creators": self._store.creators(limit=200)}
+
+    # ---- 创作者监控（转发给 CollectorApi）-------------------------------
+    # 为什么要一行一行手写，而不能继承 CollectorApi：`__dir__` 只列
+    # `vars(type(self))` 里的名字，继承来的方法不会出现在 dir() 里，
+    # pywebview 是 dir() 递归 + getattr 链暴露 js_api 的 —— 继承的写法
+    # 界面上会直接 undefined，而且单元测试直连 Python 时完全看不出来
+    # （直连能调到，只有真实窗口里调不到）。所以这里必须是显式类体方法。
+    def content_creator_list(self, enabled=None, search="", due_only=False, limit=200):
+        return self._collector.content_creator_list(enabled=enabled, search=search,
+                                                    due_only=due_only, limit=limit)
+
+    def content_creator_save(self, values=None):
+        return self._collector.content_creator_save(values)
+
+    def content_creator_delete(self, creator_id):
+        return self._collector.content_creator_delete(creator_id)
+
+    def content_creator_toggle(self, creator_id, enabled=True):
+        return self._collector.content_creator_toggle(creator_id, enabled)
+
+    def content_creator_set_interval(self, creator_id, value):
+        return self._collector.content_creator_set_interval(creator_id, value)
+
+    def content_creator_set_priority(self, creator_id, value):
+        return self._collector.content_creator_set_priority(creator_id, value)
+
+    def content_creator_check_now(self, creator_id, background=True):
+        return self._collector.content_creator_check_now(creator_id, background)
 
     def content_errors(self, limit=40):
         return errors_feed.recent_errors(store=self._store, limit=int(limit or 40))
