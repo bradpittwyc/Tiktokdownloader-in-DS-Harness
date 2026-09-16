@@ -1205,7 +1205,10 @@ const settingBuilders = {
           + fieldText('Embedding 模型', 'embedding_model', a.embedding_model, '用于语义分类、相似度计算')
           + fieldSelect('ASR / 转写', 'asr_provider', a.asr_provider, ['OpenAI Whisper（本地）', '不启用', '外部服务'])
           + fieldSelect('输出语言', 'output_language', a.output_language, ['双语（中英）', '仅中文', '仅英文'])
-          + `<div class="mt8"><button class="btn" data-act="test-ai">测试连接</button></div>`)}</section>
+          + `<div class="mt8 flex wrap"><button class="btn" data-act="test-ai">测试连接</button>
+              <button class="btn" data-act="import-legacy-ai" title="复用下载器学习文档里已配好的服务商与 Key">导入已有配置</button></div>
+             <div class="hint mt8">「导入已有配置」会把下载器学习文档（learning.json）里的
+               API Key / 地址 / 模型搬过来，省得再填一遍。</div>`)}</section>
         <section class="card">${group('生成参数设置', '',
           `<div class="field"><label class="lb">温度（创造性）</label><div class="ctl">
             <input type="range" data-key="temperature" min="0" max="1" step="0.1" value="${esc(a.temperature)}"
@@ -1769,6 +1772,13 @@ const HANDLERS = {
     toast('正在测试 AI 连接…');
     const result = await safeCall('content_test_ai', values);
     if (result && result.ok) toast(`连接成功：${result.model || ''} ${result.message || ''}`, 'good');
+  },
+  async 'import-legacy-ai'() {
+    const result = await safeCall('content_import_legacy_ai');
+    if (result && result.ok) {
+      toast(`已导入已有配置：${result.model || ''} ${result.api_base || ''}`.trim(), 'good');
+      await reloadAll();
+    }
   },
   'prompt-preview'() {
     const box = document.querySelector('#content [data-key="prompt_template"]');

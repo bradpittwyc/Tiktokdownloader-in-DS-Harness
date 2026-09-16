@@ -192,6 +192,10 @@ const factory = {
   content_topic_distribution: async()=>({ok:true, topics:[]}),
   content_settings: async()=>({ok:true}),
   content_reset_settings: async()=>({ok:true, settings:window.settingsView || {}}),
+  content_import_legacy_ai: async()=>{
+    window.calls.push({name:'content_import_legacy_ai'});
+    return {ok:true, model:'deepseek-chat', api_base:'https://api.deepseek.com/v1'};
+  },
   content_events: async()=>({ok:true, events:[]}),
 };
 window.pywebview = {api:{
@@ -453,6 +457,16 @@ class SettingsTests(ShellUITestCase):
         call = self.page.evaluate("window.calls.find(c=>c.name==='content_save_settings')")
         self.assertEqual(call["values"]["auto_collect"], False)
         self.assertIsInstance(call["values"]["filter_rules"], list)
+
+    def test_ai_settings_can_import_the_legacy_credentials(self):
+        """「导入已有配置」按钮：复用下载器学习文档里配好的 Key，别让用户再填一遍。"""
+        self.nav("settings")
+        self.page.locator('.tab[data-sub="ai"]').click()
+        self.page.wait_for_timeout(120)
+        self.page.locator('[data-act="import-legacy-ai"]').click()
+        self.page.wait_for_timeout(200)
+        calls = self.page.evaluate("window.calls.map(c=>c.name)")
+        self.assertIn("content_import_legacy_ai", calls)
 
     def test_prompt_preview_renders_the_template(self):
         self.nav("settings")

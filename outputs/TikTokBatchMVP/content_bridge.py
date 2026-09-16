@@ -202,6 +202,37 @@ class ContentFactoryApi:
                 self._settings.update("ai", staged)
         return self._pipeline._enricher.test_connection()
 
+    def content_import_legacy_ai(self):
+        """把下载器「学习文档」里已配好的 API 凭据导入内容工厂。
+
+        很多用户（包括本机）早就在 learning.json 里配过 DeepSeek，没必要为了
+        AI 标注再手填一遍 Key。只导入 api_key / api_base / model 三项，
+        其余参数保持内容工厂自己的默认值；导入后仍可在设置页覆盖。
+        """
+        import json as _json
+        import os as _os
+        from pathlib import Path as _Path
+
+        path = (_Path(_os.environ.get("LOCALAPPDATA", str(_Path.home())))
+                / "TikTokBatchMVP" / "learning.json")
+        if not path.is_file():
+            return {"ok": False, "error": "没有找到已有的学习文档配置（learning.json）"}
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {"ok": False, "error": f"读取 learning.json 失败：{exc}"}
+        key = str(data.get("api_key") or "").strip()
+        if not key:
+            return {"ok": False, "error": "已有的学习文档配置里没有 API Key"}
+        values = {"api_key": key}
+        if str(data.get("api_base") or "").strip():
+            values["api_base"] = str(data["api_base"]).strip().rstrip("/")
+        if str(data.get("model") or "").strip():
+            values["model"] = str(data["model"]).strip()
+        self._settings.update("ai", values)
+        return {"ok": True, "api_base": values.get("api_base", ""),
+                "model": values.get("model", ""), "settings": self._settings.public()}
+
     def content_choose_folder(self, kind="video"):
         """复用下载器的目录选择对话框。"""
         chooser = getattr(self._downloader, "choose_folder", None)
