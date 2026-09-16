@@ -30,6 +30,7 @@ const state = {
   demoCount: 0,
   busy: {},
   ai: { status: 'all', search: '', selected: '', expanded: {} },
+  prompts: { current: '', list: [], versions: {}, notes: {} },
   pipeline: { filter: 'all', search: '' },
   libraryLoaded: false,
 };
@@ -1223,12 +1224,21 @@ const settingBuilders = {
           + fieldSwitch('自动生成学习卡片', 'generate_cards', a.generate_cards, '生成 Anki 风格的记忆卡片')
           + fieldNumber('内容质量阈值', 'quality_threshold', a.quality_threshold, 0, 1, '低于此值标记为待复核')
           + fieldNumber('Learning Value 最低分', 'learning_value_min', a.learning_value_min, 0, 1, '低于此值不进入学习库'))}</section>
-        <section class="card">${group('Prompt 模板管理', '真实生效：AI 标注就用这段模板',
-          fieldTextarea('Prompt 模板', 'prompt_template', a.prompt_template, 16,
+        <section class="card">${group('Prompt 模板管理', '真实生效：AI 标注就用这里的版本与模板',
+          fieldSelect('Prompt 版本', 'prompt_version', state.prompts.current,
+            (state.prompts.list || []).map((entry) => [entry.version, entry.label])
+              .concat([['custom', 'custom（自定义模板）']]),
+            'v1 = 基线；v2 = 调优（允许空数组、禁止凑数）')
+          + `<div class="tiny muted" style="margin:-2px 0 8px">当前版本说明：${esc(
+              state.prompts.notes[state.prompts.current] || '（自定义模板）')}</div>`
+          + fieldTextarea('Prompt 模板', 'prompt_template', (state.settings.ai || {}).prompt_template, 16,
             '占位符：{title} {author} {description} {duration} {transcript}')
           + `<div class="mt8 flex wrap">
               <button class="btn sm" data-act="prompt-preview">预览模板渲染结果</button>
-              <button class="btn sm" data-act="prompt-reset">恢复默认模板</button></div>`)}
+              <button class="btn sm" data-act="prompt-save">保存模板</button>
+              <button class="btn sm" data-act="prompt-reset">恢复默认模板</button></div>
+             <div class="hint mt8">改动模板文本并保存会记为 <b>custom</b> 版本；改回与某个版本完全一致会重新归到该版本。
+               每条标注都会记下自己用的是哪个版本，历史不会被覆盖。</div>`)}</section>
           ${group('Token 预算与成本预估（示意）', '',
             `<div class="preview-box">
               <div class="kv"><span>平均 Token / 条</span><b>1,200</b></div>
@@ -1558,6 +1568,9 @@ function collectSettings(section) {
   nodes.forEach((node) => {
     const key = node.dataset.key;
     if (!key) return;
+    // prompt_version 是「选择器」而不是普通设置项：它由 content_set_prompt_version
+    // 单独处理，不能混进设置分区去覆盖 prompt_template
+    if (key === 'prompt_version') return;
     if (node.type === 'checkbox') {
       if (node.dataset.multi) {
         if (!Array.isArray(values[key])) values[key] = [];
@@ -1659,9 +1672,24 @@ async function reloadAll(options = {}) {
   state.demoCount = payload.demoCount || 0;
   const worker = await safeCall('content_worker_status');
   if (worker && worker.ok) state.worker = worker;
+  await loadPrompts();
   state.ready = true;
   if (options.render !== false) renderPage();
   return true;
+}
+
+/** 取 Prompt 版本清单（只在设置页用得到，但启动时取一次最省事）。 */
+async function loadPrompts() {
+  const payload = await safeCall('content_prompts');
+  if (!payload || !payload.ok) return;
+  const notes = {};
+  (payload.prompts || []).forEach((entry) => { notes[entry.version] = entry.notes; });
+  state.prompts = {
+    current: payload.current || '',
+    list: payload.prompts || [],
+    versions: Object.fromEntries((payload.prompts || []).map((e) => [e.version, e.template])),
+    notes,
+  };
 }
 
 const HANDLERS = {
@@ -1724,6 +1752,21 @@ const HANDLERS = {
   async 'settings-save'(node) {
     const section = node.dataset.section;
     const values = normalizeForSection(section, collectSettings(section));
+    // 只有 AI 加工设置有 Prompt 版本选择器：版本切换必须在保存模板之前做，
+    // 否则「保存设置」会把刚选的版本又覆盖成模板文本
+    if (section === 'ai' && values.prompt_version !== undefined) {
+      const wanted = String(values.prompt_version || '');
+      delete values.prompt_version;
+      if (wanted && wanted !== state.prompts.current) {
+        const switched = await safeCall('content_set_prompt_version', wanted);
+        if (switched && switched.ok) {
+          state.prompts.current = switched.current;
+          const box = document.querySelector('#content [data-key="prompt_template"]');
+          if (box && switched.template) box.value = switched.template;
+          await loadPrompts();
+        }
+      }
+    }
     const result = await safeCall('content_save_settings', section, values);
     if (result && result.ok) {
       state.settings = result.settings || state.settings;
@@ -1791,10 +1834,24 @@ const HANDLERS = {
       .replace('{transcript}', 'I used to think productivity was about doing more…');
     openModal(modal('Prompt 模板渲染预览', `<div class="preview-box"><pre>${esc(rendered)}</pre></div>`));
   },
+  async 'prompt-save'() {
+    const box = document.querySelector('#content [data-key="prompt_template"]');
+    if (!box) return;
+    const result = await safeCall('content_save_prompt_template', box.value);
+    if (result && result.ok) {
+      state.settings = result.settings || state.settings;
+      await loadPrompts();
+      toast(result.matched_version
+        ? `模板与 ${result.matched_version} 完全一致，已归到该版本`
+        : '模板已保存为 custom 版本', 'good');
+      renderPage();
+    }
+  },
   async 'prompt-reset'() {
     const result = await safeCall('content_reset_settings', 'ai');
     if (result && result.ok) {
       state.settings = result.settings || state.settings;
+      await loadPrompts();
       toast('已恢复默认模板与默认 AI 参数', 'good');
       await reloadAll();
     }

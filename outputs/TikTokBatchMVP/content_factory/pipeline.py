@@ -238,7 +238,9 @@ class ContentPipeline:
 
         saved = self.store.save_enrichment(
             item_id, normalized, raw_json=payload, raw_response=raw_text,
-            attempts=attempts, model=self._enricher.config()["model"])
+            attempts=attempts, model=self._enricher.config()["model"],
+            provider=self._enricher.config()["provider"],
+            prompt_version=self._enricher.config()["prompt_version"])
         elapsed = round(time.time() - started, 2)
         self._report(item_id, "done", f"标注完成（{elapsed}s）", stage="enrich",
                      enrichment=saved, elapsed=elapsed)

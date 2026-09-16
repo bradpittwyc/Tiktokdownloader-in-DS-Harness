@@ -1,0 +1,920 @@
+{
+  "_about": "AI 教学内容标注质量基准数据集。全部离线，不依赖网络与任何 API。",
+  "_fields": {
+    "id": "稳定标识，结果文件里用它对齐 A/B",
+    "title / creator / description / duration": "与真实入库时一致的输入字段",
+    "transcript": "字幕文本（手工整理的代表性样本，不含真实用户隐私）",
+    "expect": "人工标注的参考答案，评分时用来对比；不是必须逐字命中，而是判断方向对不对",
+    "expect.topic_any": "可接受的 topic 说法（命中任一即算对）",
+    "expect.topic_forbidden": "明确不该出现的 topic（张冠李戴）",
+    "expect.subtopic_keywords": "subtopic 里应当体现的要点",
+    "expect.cefr_band": "[最低, 最高]，区间内满分，差一档给部分分",
+    "expect.learning_value_band": "[最低, 最高]，模型给分落在区间内算准",
+    "expect.must_expressions": "真正值得教的表达（模型能提到一部分就算好）",
+    "expect.forbidden_expressions": "普通词 / 噪声 / 占位文字，提了要扣分",
+    "expect.grammar_ok_empty": "true 表示这条内容本来就没什么语法可讲，返回空数组是正确答案",
+    "expect.generic_grammar_forbidden": "这条里出现这些教科书式语法点就是凑数"
+  },
+  "items": [
+    {
+      "id": "ai-tech-interview-01",
+      "category": "访谈",
+      "title": "ML engineer explains how models actually get deployed",
+      "creator": "mlexplained",
+      "description": "Interview clip about the gap between training and production.",
+      "duration": 58,
+      "speech_note": "正常语速，有口语填充词",
+      "transcript": "I mean, training a model is honestly the easy part. Getting it into production, that's where things fall apart. You've got latency budgets, you've got this whole mess of feature pipelines, and half the time the data you trained on doesn't even look like the data you get in production. So to be fair, most of the work isn't the modelling at all. It's the plumbing around it.",
+      "expect": {
+        "topic_any": [
+          "AI 科技",
+          "AI",
+          "人工智能",
+          "机器学习",
+          "科技"
+        ],
+        "subtopic_keywords": [
+          "部署",
+          "生产",
+          "工程",
+          "落地",
+          "MLOps"
+        ],
+        "cefr_band": [
+          "B2",
+          "C1"
+        ],
+        "learning_value_band": [
+          0.6,
+          0.95
+        ],
+        "must_expressions": [
+          "the easy part",
+          "fall apart",
+          "to be fair",
+          "latency budgets",
+          "the plumbing around it"
+        ],
+        "forbidden_expressions": [
+          "model",
+          "data",
+          "work",
+          "time"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "ai-tech-opinion-02",
+      "category": "AI / 科技",
+      "title": "The real reason AI will change everything",
+      "creator": "techwithtim",
+      "description": "It is not about robots taking jobs. It is about the cost of thinking going to zero.",
+      "duration": 72,
+      "speech_note": "偏快，信息密度高",
+      "transcript": "Everyone asks me whether AI is going to take our jobs, and honestly that is the wrong question. The real shift is that the cost of thinking is collapsing. When something becomes a thousand times cheaper, you do not just do the same thing more cheaply, you do entirely new things. Nobody in 1970 predicted that we would carry a supercomputer in our pocket and use it mostly to look at pictures of cats. So when I look at AI, I do not see a replacement. I see a tool that lets one person do the work of a small team.",
+      "expect": {
+        "topic_any": [
+          "AI 科技",
+          "AI",
+          "人工智能",
+          "科技"
+        ],
+        "subtopic_keywords": [
+          "就业",
+          "工作",
+          "未来",
+          "影响"
+        ],
+        "cefr_band": [
+          "B2",
+          "C1"
+        ],
+        "learning_value_band": [
+          0.75,
+          1.0
+        ],
+        "must_expressions": [
+          "that is the wrong question",
+          "the cost of thinking",
+          "do the work of a small team",
+          "entirely new things"
+        ],
+        "forbidden_expressions": [
+          "job",
+          "thing",
+          "AI"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "business-freelance-03",
+      "category": "商业",
+      "title": "Nobody tells you this about freelancing",
+      "creator": "genzfinance",
+      "description": "The unglamorous truth about going freelance.",
+      "duration": 45,
+      "speech_note": "中等语速，短句多",
+      "transcript": "Nobody tells you that freelancing is mostly sales. You can be the best designer in the world, but if you cannot find the next client, you are out of business. The second thing nobody tells you is that your income becomes lumpy. You might make ten thousand dollars in March and nothing in April. So the rule I follow is simple. Live on last month's money and keep six months of expenses in cash.",
+      "expect": {
+        "topic_any": [
+          "商业",
+          "自由职业",
+          "财务",
+          "个人理财",
+          "创业",
+          "职场成长",
+          "职业发展"
+        ],
+        "subtopic_keywords": [
+          "自由职业",
+          "收入",
+          "现金流"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.6,
+          0.9
+        ],
+        "must_expressions": [
+          "nobody tells you",
+          "out of business",
+          "lumpy",
+          "live on last month's money",
+          "the rule I follow"
+        ],
+        "forbidden_expressions": [
+          "money",
+          "client",
+          "dollars"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "career-habits-04",
+      "category": "职场",
+      "title": "3 habits that changed my life as a software engineer",
+      "creator": "emilyintech",
+      "description": "Sharing the three daily habits that made the biggest difference in my career.",
+      "duration": 37,
+      "speech_note": "中等语速",
+      "transcript": "I used to think productivity was about doing more, but I learned the hard way that it's actually about protecting your focus. The first habit is what I call a shutdown ritual. Every evening I write down the three things that matter for tomorrow, and then I close my laptop. That single habit cut my anxiety in half. The second one is batching shallow work. Email, Slack, small reviews, they all go into one thirty-minute block in the afternoon. The third habit is probably the hardest one to keep. I schedule a two-hour deep work block before anyone else on my team is awake.",
+      "expect": {
+        "topic_any": [
+          "职场成长",
+          "职场",
+          "效率",
+          "个人成长"
+        ],
+        "subtopic_keywords": [
+          "习惯",
+          "效率",
+          "专注"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.7,
+          1.0
+        ],
+        "must_expressions": [
+          "learned the hard way",
+          "protecting your focus",
+          "shutdown ritual",
+          "cut my anxiety in half",
+          "batching"
+        ],
+        "forbidden_expressions": [
+          "laptop",
+          "email",
+          "habit"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "business-copywriting-05",
+      "category": "商业",
+      "title": "How to write copy that actually converts",
+      "creator": "copyhackers",
+      "description": "A short lesson on writing landing page copy.",
+      "duration": 52,
+      "speech_note": "中等偏慢，教学口吻",
+      "transcript": "Here's the thing about copywriting. Most people write about the product, but they should be writing about the problem. If your headline doesn't name the pain your reader already feels, they will scroll straight past it. So lead with the problem, then show the solution. And please, cut the buzzwords. Nobody has ever bought anything because a paragraph was synergy-driven.",
+      "expect": {
+        "topic_any": [
+          "商业",
+          "营销",
+          "文案",
+          "写作",
+          "职场技能",
+          "内容创作"
+        ],
+        "subtopic_keywords": [
+          "文案",
+          "转化",
+          "营销"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.6,
+          0.9
+        ],
+        "must_expressions": [
+          "here's the thing",
+          "lead with",
+          "scroll past",
+          "cut the buzzwords",
+          "name the pain"
+        ],
+        "forbidden_expressions": [
+          "product",
+          "problem",
+          "write"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "business-startup-06",
+      "category": "商业",
+      "title": "Why most startups fail in year two",
+      "creator": "startupdiaries",
+      "description": "Lessons from three failed startups.",
+      "duration": 63,
+      "speech_note": "中等语速，叙事",
+      "transcript": "We raised a seed round, hired too fast, and then watched the runway shrink month after month. Looking back, the writing was on the wall long before we admitted it. We were chasing a market that didn't exist yet, and we mistook early enthusiasm for real demand. My advice? Talk to twenty customers before you write a single line of code, and be brutally honest about what you hear.",
+      "expect": {
+        "topic_any": [
+          "商业",
+          "创业",
+          "startup",
+          "职场成长",
+          "商业观察"
+        ],
+        "subtopic_keywords": [
+          "创业",
+          "失败",
+          "融资"
+        ],
+        "cefr_band": [
+          "B2",
+          "C1"
+        ],
+        "learning_value_band": [
+          0.6,
+          0.95
+        ],
+        "must_expressions": [
+          "the writing was on the wall",
+          "mistook",
+          "runway",
+          "be brutally honest",
+          "chasing a market"
+        ],
+        "forbidden_expressions": [
+          "startup",
+          "customers",
+          "code"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "career-negotiation-07",
+      "category": "职场",
+      "title": "The salary negotiation line that works",
+      "creator": "careertalk",
+      "description": "One sentence that changed a negotiation.",
+      "duration": 41,
+      "speech_note": "中等语速",
+      "transcript": "The line I use is this. I am really excited about this role, and I want to make this work, so can we talk about the number. Then you go quiet. Do not fill the silence. Most people cave in about four seconds in, and they leave money on the table every single time.",
+      "expect": {
+        "topic_any": [
+          "职场",
+          "职场成长",
+          "沟通",
+          "谈判"
+        ],
+        "subtopic_keywords": [
+          "谈判",
+          "薪资",
+          "沟通"
+        ],
+        "cefr_band": [
+          "A2",
+          "B1"
+        ],
+        "learning_value_band": [
+          0.55,
+          0.9
+        ],
+        "must_expressions": [
+          "make this work",
+          "go quiet",
+          "fill the silence",
+          "cave in",
+          "leave money on the table"
+        ],
+        "forbidden_expressions": [
+          "role",
+          "number",
+          "money"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "ai-tech-tutorial-08",
+      "category": "教程",
+      "title": "Fine-tuning vs prompting, explained simply",
+      "creator": "aiexplained",
+      "description": "When to prompt and when to fine-tune.",
+      "duration": 66,
+      "speech_note": "偏慢，教学",
+      "transcript": "Let's start with the basics. Prompting means you keep the model as it is and describe what you want in plain language. Fine-tuning, on the other hand, means you show the model hundreds of examples and let it adjust its own weights. The rule of thumb is straightforward. If you can describe the task in a paragraph, prompt it. If you need the model to imitate a very specific house style, then it is worth fine-tuning. And one more thing, always try prompting first, because it is dramatically cheaper.",
+      "expect": {
+        "topic_any": [
+          "AI 科技",
+          "AI",
+          "教程",
+          "科技"
+        ],
+        "subtopic_keywords": [
+          "微调",
+          "提示词",
+          "模型"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.65,
+          0.95
+        ],
+        "must_expressions": [
+          "on the other hand",
+          "rule of thumb",
+          "worth fine-tuning",
+          "one more thing",
+          "house style"
+        ],
+        "forbidden_expressions": [
+          "model",
+          "prompt",
+          "examples"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "ai-tech-skeptic-09",
+      "category": "AI / 科技",
+      "title": "The metaverse hype, two years later",
+      "creator": "techskeptic",
+      "description": "What actually happened to the metaverse.",
+      "duration": 90,
+      "speech_note": "偏快，讽刺口吻",
+      "transcript": "Two years ago every keynote ended with a promise that we would all be working in headsets. Fast forward to today, and the whole thing has quietly fizzled out. The hardware was clunky, the experience was isolating, and nobody could articulate a single problem it solved better than a laptop. I am not saying immersive computing is dead. I am saying the hype got ahead of the substance, as it usually does.",
+      "expect": {
+        "topic_any": [
+          "AI 科技",
+          "科技",
+          "元宇宙",
+          "商业",
+          "科技评论"
+        ],
+        "subtopic_keywords": [
+          "元宇宙",
+          "炒作",
+          "科技趋势"
+        ],
+        "cefr_band": [
+          "B2",
+          "C1"
+        ],
+        "learning_value_band": [
+          0.55,
+          0.9
+        ],
+        "must_expressions": [
+          "fast forward to",
+          "fizzled out",
+          "got ahead of",
+          "as it usually does",
+          "articulate a problem"
+        ],
+        "forbidden_expressions": [
+          "headset",
+          "laptop",
+          "metaverse"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "lifestyle-morning-10",
+      "category": "生活方式",
+      "title": "My 5am morning routine, honestly",
+      "creator": "morningwithkate",
+      "description": "A realistic morning routine.",
+      "duration": 34,
+      "speech_note": "偏慢，A2 词汇",
+      "transcript": "I get up at five, but I don't do anything special. I drink a glass of water, I make coffee, and I sit down with a notebook for ten minutes. That's it. No cold shower, no hour of meditation. The point is not to be impressive. The point is to start the day before everybody needs something from me.",
+      "expect": {
+        "topic_any": [
+          "生活方式",
+          "生活技巧",
+          "日常",
+          "个人成长",
+          "自律"
+        ],
+        "subtopic_keywords": [
+          "早起",
+          "习惯",
+          "morning routine",
+          "作息"
+        ],
+        "cefr_band": [
+          "A2",
+          "B1"
+        ],
+        "learning_value_band": [
+          0.35,
+          0.7
+        ],
+        "must_expressions": [
+          "that's it",
+          "the point is",
+          "be impressive",
+          "before everybody needs something"
+        ],
+        "forbidden_expressions": [
+          "coffee",
+          "water",
+          "five"
+        ],
+        "grammar_ok_empty": true
+      }
+    },
+    {
+      "id": "lifestyle-tinyhome-11",
+      "category": "生活方式",
+      "title": "Living in a 20 square meter apartment",
+      "creator": "tinyhome",
+      "description": "How I made a tiny apartment work.",
+      "duration": 47,
+      "speech_note": "中等语速",
+      "transcript": "People always ask me how I fit everything into twenty square meters. The honest answer is that I got rid of most of it. It turns out you don't need nearly as much as you think. Every object I own has a place, and if something doesn't earn its space, it goes. Living small forced me to be deliberate about what I bring home.",
+      "expect": {
+        "topic_any": [
+          "生活方式",
+          "家居",
+          "极简",
+          "生活技巧",
+          "家居生活"
+        ],
+        "subtopic_keywords": [
+          "小户型",
+          "极简",
+          "收纳"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.5,
+          0.85
+        ],
+        "must_expressions": [
+          "it turns out",
+          "got rid of",
+          "earn its space",
+          "be deliberate about"
+        ],
+        "forbidden_expressions": [
+          "apartment",
+          "space",
+          "object"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "lifestyle-cooking-12",
+      "category": "教程",
+      "title": "The only pasta sauce you need",
+      "creator": "weeknightkitchen",
+      "description": "A five-ingredient pasta sauce.",
+      "duration": 55,
+      "speech_note": "中等语速，操作指令多",
+      "transcript": "Start by heating a good glug of olive oil over medium heat. Add the garlic and let it sizzle, but don't let it brown, or it turns bitter. Then in goes the tomatoes. Let it bubble away for about fifteen minutes. Season it, taste it, and season it again. That last part is the one everybody skips, and it's the difference between fine and really good.",
+      "expect": {
+        "topic_any": [
+          "教程",
+          "美食",
+          "生活方式",
+          "烹饪",
+          "生活技巧"
+        ],
+        "subtopic_keywords": [
+          "食谱",
+          "意面",
+          "烹饪"
+        ],
+        "cefr_band": [
+          "A2",
+          "B1"
+        ],
+        "learning_value_band": [
+          0.45,
+          0.8
+        ],
+        "must_expressions": [
+          "start by",
+          "let it sizzle",
+          "bubble away",
+          "in goes",
+          "the difference between"
+        ],
+        "forbidden_expressions": [
+          "garlic",
+          "tomatoes",
+          "olive oil"
+        ],
+        "grammar_ok_empty": true
+      }
+    },
+    {
+      "id": "growth-mindset-13",
+      "category": "个人成长",
+      "title": "This changed my mindset",
+      "creator": "jordanbpetersen",
+      "description": "A short talk on mindset.",
+      "duration": 135,
+      "speech_note": "偏慢，抽象表达多",
+      "transcript": "You are not going to fix your life in one afternoon. What you can do is fix one small thing today, and then keep that small thing fixed. That is how order gets built, incrementally, and it is also how confidence gets built, because every small promise you keep to yourself is evidence that your word means something. So pick something almost trivial, and then do not negotiate with yourself about it.",
+      "expect": {
+        "topic_any": [
+          "个人成长",
+          "心态",
+          "自我提升",
+          "生活方式",
+          "心理成长",
+          "个人提升"
+        ],
+        "subtopic_keywords": [
+          "心态",
+          "习惯",
+          "自信"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.6,
+          0.95
+        ],
+        "must_expressions": [
+          "fix your life",
+          "keep something fixed",
+          "order gets built",
+          "your word means something",
+          "negotiate with yourself"
+        ],
+        "forbidden_expressions": [
+          "life",
+          "thing",
+          "confidence"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "growth-anxiety-14",
+      "category": "个人成长",
+      "title": "How I stopped overthinking everything",
+      "creator": "mindsetmatters",
+      "description": "Practical advice on overthinking.",
+      "duration": 49,
+      "speech_note": "中等语速",
+      "transcript": "Overthinking feels productive, and that is the trap. You convince yourself you are solving a problem, when really you are just going around in circles. What broke the loop for me was a stupidly simple question. What is the next physical action? Not the next feeling, not the next worry. The next physical action. Nine times out of ten, it takes two minutes, and the spiral is gone.",
+      "expect": {
+        "topic_any": [
+          "个人成长",
+          "心理健康",
+          "心态",
+          "心理成长",
+          "情绪管理"
+        ],
+        "subtopic_keywords": [
+          "内耗",
+          "过度思考",
+          "焦虑"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.6,
+          0.95
+        ],
+        "must_expressions": [
+          "going around in circles",
+          "broke the loop",
+          "nine times out of ten",
+          "the trap",
+          "the next physical action"
+        ],
+        "forbidden_expressions": [
+          "problem",
+          "question",
+          "minutes"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "growth-habits-15",
+      "category": "个人成长",
+      "title": "Small habits, big change",
+      "creator": "melrobbins",
+      "description": "Why tiny habits beat motivation.",
+      "duration": 45,
+      "speech_note": "中等语速，激励口吻",
+      "transcript": "Your habits are not going to change because you feel motivated. They change because you make them ridiculously easy. If you want to read more, put the book on your pillow in the morning. If you want to exercise, sleep in your workout clothes. Motivation is a feeling, and feelings make terrible project managers.",
+      "expect": {
+        "topic_any": [
+          "个人成长",
+          "习惯",
+          "效率",
+          "生活方式",
+          "自我提升"
+        ],
+        "subtopic_keywords": [
+          "习惯",
+          "动机",
+          "微习惯"
+        ],
+        "cefr_band": [
+          "A2",
+          "B1"
+        ],
+        "learning_value_band": [
+          0.55,
+          0.85
+        ],
+        "must_expressions": [
+          "ridiculously easy",
+          "make terrible project managers",
+          "sleep in your workout clothes"
+        ],
+        "forbidden_expressions": [
+          "book",
+          "habit",
+          "motivation"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "daily-smalltalk-16",
+      "category": "日常口语",
+      "title": "Coffee shop small talk that sounds natural",
+      "creator": "englishwithlucy",
+      "description": "Natural small talk phrases.",
+      "duration": 38,
+      "speech_note": "偏慢，口语短语密集",
+      "transcript": "So how's your week been? Busy, but you know, can't complain. Same here, honestly. Anyway, I should let you get on. Let's grab a coffee sometime next week. Sounds good, I'll text you. Take care, see you around.",
+      "expect": {
+        "topic_any": [
+          "日常口语",
+          "英语学习",
+          "教育",
+          "生活",
+          "语言学习"
+        ],
+        "subtopic_keywords": [
+          "口语",
+          "寒暄",
+          "small talk"
+        ],
+        "cefr_band": [
+          "A2",
+          "B1"
+        ],
+        "learning_value_band": [
+          0.5,
+          0.85
+        ],
+        "must_expressions": [
+          "how's your week been",
+          "can't complain",
+          "I should let you get on",
+          "grab a coffee",
+          "see you around",
+          "same here"
+        ],
+        "forbidden_expressions": [
+          "coffee",
+          "week",
+          "text"
+        ],
+        "grammar_ok_empty": true
+      }
+    },
+    {
+      "id": "interview-honest-17",
+      "category": "访谈",
+      "title": "Interview: what nobody says about success",
+      "creator": "longformpodcast",
+      "description": "Long-form interview clip.",
+      "duration": 84,
+      "speech_note": "偏慢，长句多，C1 结构",
+      "transcript": "I think the thing people get wrong about success is that they imagine it as a moment. In my experience it is far more mundane than that. It is a series of unremarkable days in which you did not quit, and the cumulative effect of that, frankly, is what people later call overnight success. The uncomfortable corollary is that you cannot shortcut it. There is no version of this where the work happens without you.",
+      "expect": {
+        "topic_any": [
+          "个人成长",
+          "访谈",
+          "职场成长",
+          "成功",
+          "人生感悟"
+        ],
+        "subtopic_keywords": [
+          "成功",
+          "坚持",
+          "长期主义"
+        ],
+        "cefr_band": [
+          "B2",
+          "C1"
+        ],
+        "learning_value_band": [
+          0.7,
+          1.0
+        ],
+        "must_expressions": [
+          "get wrong",
+          "far more mundane",
+          "cumulative effect",
+          "overnight success",
+          "the uncomfortable corollary",
+          "shortcut it"
+        ],
+        "forbidden_expressions": [
+          "success",
+          "work",
+          "days"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "tutorial-english-learning-18",
+      "category": "教程",
+      "title": "Why you should learn English with stories",
+      "creator": "englishwithlucy",
+      "description": "Why stories beat word lists.",
+      "duration": 52,
+      "speech_note": "偏慢，二语教学腔",
+      "transcript": "Here is the thing about vocabulary lists. You memorise fifty words, and by Friday you remember maybe six of them. But if those same fifty words appear inside a story you actually care about, your brain files them under meaning instead of under homework. That is why I always tell my students to read one page they love rather than ten pages they tolerate.",
+      "expect": {
+        "topic_any": [
+          "教育",
+          "英语学习",
+          "教程",
+          "语言学习"
+        ],
+        "subtopic_keywords": [
+          "学习方法",
+          "词汇",
+          "阅读"
+        ],
+        "cefr_band": [
+          "B1",
+          "B2"
+        ],
+        "learning_value_band": [
+          0.7,
+          1.0
+        ],
+        "must_expressions": [
+          "here is the thing about",
+          "files them under",
+          "instead of",
+          "rather than",
+          "tolerate"
+        ],
+        "forbidden_expressions": [
+          "words",
+          "story",
+          "brain"
+        ],
+        "grammar_ok_empty": false
+      }
+    },
+    {
+      "id": "tutorial-photo-lighting-19",
+      "category": "教程",
+      "title": "Phone photography: fix your lighting first",
+      "creator": "shotonphone",
+      "description": "Lighting basics for phone photos.",
+      "duration": 44,
+      "speech_note": "中等语速",
+      "transcript": "Before you buy another lens, fix your lighting. Stand facing a window, and you are already ahead of ninety percent of people shooting indoors. If the light is harsh, move a step back or diffuse it with a white curtain. And please stop using the flash. It flattens everything and makes skin look plastic.",
+      "expect": {
+        "topic_any": [
+          "教程",
+          "摄影",
+          "生活方式",
+          "生活技巧"
+        ],
+        "subtopic_keywords": [
+          "摄影",
+          "光线",
+          "手机"
+        ],
+        "cefr_band": [
+          "A2",
+          "B1"
+        ],
+        "learning_value_band": [
+          0.45,
+          0.8
+        ],
+        "must_expressions": [
+          "ahead of",
+          "fix your lighting",
+          "diffuse it",
+          "flattens everything",
+          "a step back"
+        ],
+        "forbidden_expressions": [
+          "lens",
+          "window",
+          "flash"
+        ],
+        "grammar_ok_empty": true
+      }
+    },
+    {
+      "id": "daily-lowinfo-20",
+      "category": "日常口语",
+      "title": "POV: your Monday morning",
+      "creator": "relatableclips",
+      "description": "A relatable skit, almost no information.",
+      "duration": 22,
+      "speech_note": "短内容，信息密度极低",
+      "transcript": "Okay so basically, yeah, it is Monday. I am tired. That is it. That is the video. If you feel the same way, yeah, same.",
+      "expect": {
+        "topic_any": [
+          "日常口语",
+          "生活",
+          "娱乐",
+          "生活方式",
+          "生活技巧"
+        ],
+        "subtopic_keywords": [
+          "日常",
+          "情绪",
+          "娱乐"
+        ],
+        "cefr_band": [
+          "A2",
+          "B1"
+        ],
+        "learning_value_band": [
+          0.05,
+          0.35
+        ],
+        "must_expressions": [],
+        "forbidden_expressions": [
+          "Monday",
+          "tired",
+          "video",
+          "basically"
+        ],
+        "grammar_ok_empty": true,
+        "generic_grammar_forbidden": [
+          "一般现在时",
+          "主系表结构",
+          "简单句"
+        ]
+      }
+    }
+  ]
+}

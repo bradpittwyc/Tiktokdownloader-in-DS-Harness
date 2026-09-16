@@ -74,10 +74,13 @@ CREATE TABLE IF NOT EXISTS ai_enrichments (
     key_sentences     TEXT DEFAULT '[]',
     summary_zh        TEXT DEFAULT '',
     recommended_task  TEXT DEFAULT '',
+    classification,
     raw_json          TEXT DEFAULT '{}',
     raw_response      TEXT DEFAULT '',
     attempts          INTEGER DEFAULT 0,
     model             TEXT DEFAULT '',
+    provider          TEXT DEFAULT '',
+    prompt_version    TEXT DEFAULT '',
     analyzed_at       TEXT DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_enrichment_item ON ai_enrichments(content_item_id);
@@ -139,8 +142,31 @@ class FactoryStore:
                 return self
             with closing(self.connect()) as connection, connection:
                 connection.executescript(SCHEMA)
+                self._migrate(connection)
             self._schema_ready = True
             return self
+
+    @staticmethod
+    def _migrate(connection):
+        """给已经存在的旧库补新增列。
+
+        为什么必须有：用户本机已经有一份存了标注结果的 content-factory.db，
+        `CREATE TABLE IF NOT EXISTS` 对已存在的表**什么都不会做** —— 新加的
+        prompt_version / provider 会永远不存在，保存标注时直接报
+        "no such column"，而且是在用户已经跑了一段时间之后才炸。
+        所以按 SQLite 的 table_info 逐个补列，已存在就跳过（幂等，可反复执行）。
+        """
+        wanted = {
+            "ai_enrichments": (("provider", "TEXT DEFAULT ''"),
+                               ("prompt_version", "TEXT DEFAULT ''")),
+        }
+        for table, columns in wanted.items():
+            existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue
+            for name, definition in columns:
+                if name not in existing:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     def _rows(self, sql, params=()):
         self.init()
@@ -301,7 +327,8 @@ class FactoryStore:
         return self._write("DELETE FROM content_items WHERE id=?", (item_id,))
 
     # ---- enrichment ----------------------------------------------------
-    def save_enrichment(self, item_id, data, raw_json=None, raw_response="", attempts=0, model=""):
+    def save_enrichment(self, item_id, data, raw_json=None, raw_response="", attempts=0,
+                        model="", provider="", prompt_version=""):
         """写入 / 覆盖一条标注结果（唯一索引保证一条内容只有一份最新结果）。"""
         self.init()
         values = {
@@ -321,6 +348,9 @@ class FactoryStore:
             "raw_response": str(raw_response or "")[:20000],
             "attempts": int(attempts or 0),
             "model": model or "",
+            # 记下"这份标注是谁产的"：以后 A/B 对比、回溯质量问题时唯一能依赖的线索
+            "provider": provider or "",
+            "prompt_version": prompt_version or "",
             "analyzed_at": now_text(),
         }
         existing = self.enrichment(item_id)

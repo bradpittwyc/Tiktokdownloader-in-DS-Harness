@@ -29,6 +29,8 @@ import json
 import re
 import threading
 
+from .prompts import ACTIVE_VERSION, PROMPT_LIBRARY, resolve_prompt
+
 ENRICHMENT_FIELDS = (
     "topic", "subtopic", "cefr_level", "accent", "speech_speed", "learning_value",
     "keywords", "expressions", "grammar_points", "key_sentences", "summary_zh",
@@ -38,42 +40,11 @@ ENRICHMENT_FIELDS = (
 CEFR_LEVELS = ("A1", "A2", "B1", "B2", "C1", "C2")
 SPEECH_SPEEDS = ("慢速", "中等", "偏快")
 
-DEFAULT_PROMPT_TEMPLATE = """你是英语教学内容分析专家。下面是一条 TikTok 视频的元信息与字幕文本，
-请分析它作为英语学习材料的价值，并**只输出一个 JSON 对象**，不要任何解释、不要 Markdown 围栏。
 
-输出 JSON 必须严格包含以下字段：
-{
-  "topic": "主题（中文，如：AI 科技 / 职场成长 / 生活技巧）",
-  "subtopic": "更细的子主题（中文）",
-  "cefr_level": "难度等级，只能是 A1/A2/B1/B2/C1/C2 之一",
-  "accent": "口音，如：美音 / 英音 / 澳音 / 不确定",
-  "speech_speed": "语速，只能是 慢速/中等/偏快 之一",
-  "learning_value": 0.0 到 1.0 之间的小数，越高越适合学习,
-  "keywords": ["关键词，英文原词，最多 10 个"],
-  "expressions": [
-    {"text": "地道表达或短语", "meaning_zh": "中文意思", "example": "例句（可选）"}
-  ],
-  "grammar_points": ["语法点，如：现在完成时"],
-  "key_sentences": [
-    {"text": "值得背诵的英文原句", "translation_zh": "中文翻译"}
-  ],
-  "summary_zh": "一到两句中文摘要",
-  "recommended_task": "推荐练习任务，如：跟读 / 复述 / 影子跟读 / 填空练习"
-}
-
-要求：
-- expressions 给 3–6 条，key_sentences 给 3–5 条，keywords 给 5–10 个，grammar_points 给 2–4 条。
-- 所有中文说明用简体中文；keywords / expressions.text / key_sentences.text 保留英文原文。
-- 如果字幕过短或信息不足，仍然照常输出 JSON，把不确定的字段填「不确定」，learning_value 给偏低的值。
-
-视频信息：
-- 标题：{title}
-- 作者：@{author}
-- 简介：{description}
-- 时长：{duration} 秒
-- 字幕文本：
-{transcript}
-"""
+# 默认 prompt 现在由 `prompts.PROMPT_LIBRARY` 提供（带版本号、不覆盖旧版）。
+# 这个常量名保留下来，是因为 settings_store 与内容工厂的 __init__ 都在用它；
+# 它的值等于「当前推荐版本」的模板。想看历史版本请用 prompts.get_prompt("ai-enrichment-v1")。
+DEFAULT_PROMPT_TEMPLATE = PROMPT_LIBRARY[ACTIVE_VERSION].template
 
 
 def describe_http_error(exc, config=None):
@@ -356,6 +327,7 @@ class EnrichmentService:
     # ---- 配置 ----------------------------------------------------------
     def config(self):
         section = self._settings.section("ai") if self._settings else {}
+        version, template = resolve_prompt(section.get("prompt_template"))
         return {
             "provider": section.get("provider") or "DeepSeek",
             "model": (section.get("model") or "deepseek-chat").strip(),
@@ -363,7 +335,8 @@ class EnrichmentService:
             "api_key": str(section.get("api_key") or "").strip(),
             "max_tokens": int(section.get("max_tokens") or 4000),
             "temperature": float(section.get("temperature", 0.7)),
-            "prompt_template": section.get("prompt_template") or DEFAULT_PROMPT_TEMPLATE,
+            "prompt_version": version,
+            "prompt_template": template,
         }
 
     def configured(self):
