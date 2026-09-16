@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Tony Content Engine</title>
+<!--
+  Tony Content Engine —— 内容工厂主界面（第一阶段 MVP）
+
+  这一页是新的外壳：左侧深色导航 + 顶部状态栏 + 白色主内容区 + 蓝色强调色，
+  结构参照用户提供的 UI 参考图。原来的下载器界面完整保留在 index.html，
+  通过「视频库」页以 iframe 内嵌（同源 file:// 下可访问同一个 pywebview 桥接）。
+
+  样式在 app.css，逻辑在 app.js（都是同目录相对路径，打包时一起进 ui/）。
+-->
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<div class="shell">
+
+  <!-- ==================== 左侧导航 ==================== -->
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark">T</div>
+      <div>
+        <div class="brand-name">Tony Content Engine</div>
+        <div class="brand-sub">让优质内容，成为更好的你</div>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav"><!-- app.js 渲染 --></nav>
+
+    <div class="side-foot">
+      <div class="side-card">
+        <span class="ext">↗</span>
+        <b>Tony Learning OS</b>
+        <p>把优质内容，变成更好的自己（下一阶段接入）</p>
+      </div>
+      <div class="side-version" id="sideVersion">v2.0 · Content Factory MVP</div>
+    </div>
+  </aside>
+
+  <!-- ==================== 主区 ==================== -->
+  <main class="main">
+    <header class="topbar">
+      <span class="pill" id="topStatus"><span class="dot"></span>Worker 在线</span>
+      <span class="pill blue" id="topQueue">待分析 0</span>
+      <span class="top-meta" id="topChecked">上次检查：—</span>
+      <span class="top-spacer"></span>
+      <button class="btn sm" data-act="reload">刷新状态</button>
+      <button class="btn sm primary" data-act="nav" data-page="errors">立即检查</button>
+    </header>
+
+    <div class="content" id="content">
+      <div class="empty"><div class="em-ico">⏳</div><b>正在启动内容工厂…</b><p>读取本地内容库与设置</p></div>
+    </div>
+  </main>
+</div>
+
+<div id="modalHost" class="hidden"></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -191,6 +191,40 @@ class Api:
         self._filename_template = self._load_filename_template()
         self._learning = self._load_learning_options()
         self._update_token = self._load_update_token()
+        # Tony Content Engine 的服务层入口。延迟到第一次访问才建实例：
+        # sqlite 连接、设置读取都不该拖慢窗口创建。
+        self._content_factory = None
+
+    # ---- Tony Content Engine 桥接 --------------------------------------
+    @property
+    def content_factory(self):
+        """内容工厂的对外接口（界面用 content_factory.content_* 调用）。
+
+        包在 _Hidden 里：pywebview 会把 js_api 上的属性递归展开成可调用列表，
+        直接挂裸对象会把服务层内部方法也暴露出去。
+        """
+        if self._content_factory is None:
+            from content_bridge import ContentFactoryApi, _Hidden
+            self._content_factory = _Hidden(ContentFactoryApi(downloader=self))
+        return self._content_factory
+
+    def _notify_content_factory(self, item, target, subtitles, media=""):
+        """下载完成后把结果写进内容库（下载 → 内容库 自动衔接）。
+
+        刻意不抛异常：内容工厂出问题不能反过来影响下载主流程。
+        """
+        try:
+            factory = self.content_factory
+            factory.content_register_download({
+                "id": item.get("id"), "title": item.get("title"),
+                "url": item.get("url"), "description": item.get("description") or "",
+                "cover": item.get("cover") or "", "duration": item.get("duration") or 0,
+                "folder": str(target), "media": str(media or ""),
+                "subtitles": [str(path) for path in (subtitles or [])],
+                "state": "done",
+            })
+        except Exception as exc:
+            log_event(f"写入内容工厂失败：{exc}")
 
     def _load_filename_template(self):
         path = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TikTokBatchMVP" / "filename-template.txt"
@@ -2018,6 +2052,7 @@ class Api:
                         self._emit("downloadProgress", {"id": item["id"], "state": "progress", "percent": round(photo_index * 100 / len(urls))})
                     ok += 1
                     self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target), "subtitles": []})
+                    self._notify_content_factory(item, target, [], media=str(post_folder))
                     continue
                 options = {
                     "outtmpl": str(target / (self._filename_template if "%(ext)" in self._filename_template else self._filename_template + ".%(ext)s")),
@@ -2076,6 +2111,8 @@ class Api:
                 subtitle_paths = [str(path) for path in resolved_subtitles]
                 self._emit("downloadProgress", {"id": item["id"], "state": "done", "folder": str(target),
                                                  "subtitles": subtitle_paths})
+                self._notify_content_factory(item, target, subtitle_paths,
+                                             media=media_files[0] if media_files else "")
                 self._queue_learning_document(item, target, subtitle_paths)
             except Exception as exc:
                 if self._cancel_downloads.is_set():
@@ -2157,15 +2194,19 @@ def start_ui(api):
     Measured with two separate processes on a file:// page:
         private_mode=True  -> write 'VALUE-123', next run reads None
         private_mode=False -> write 'VALUE-123', next run reads 'VALUE-123'
+
+    从 v2.0 起首页是内容工厂外壳（ui/app.html），原下载器界面完整保留在
+    ui/index.html 里，由外壳的「视频库」页内嵌显示 —— 现有 7 个 UI 测试
+    仍然直接加载 index.html，所以那套断言一行都不用改。
     """
     api._window = webview.create_window(
         WINDOW_TITLE,
-        str(BASE / "ui" / "index.html"),
+        str(BASE / "ui" / "app.html"),
         js_api=api,
-        width=1320,
-        height=880,
-        min_size=(1000, 650),
-        background_color="#0b0e14",
+        width=1360,
+        height=900,
+        min_size=(1080, 700),
+        background_color="#111a2e",
     )
     webview.start(func=apply_window_icon, debug=False, private_mode=False,
                   storage_path=str(webview_storage_path()))
