@@ -517,6 +517,83 @@ class SettingsTests(ShellUITestCase):
         self.assertEqual(call["values"]["bucket"], "my-new-bucket")
         self.assertEqual(call["values"]["keep_video_days"], 30, "数字字段要以数字类型提交")
 
+    def test_browse_button_is_not_collected_as_a_setting_field(self):
+        """目录「浏览」按钮不能被 collectSettings 当成设置字段。
+
+        它以前也带 data-key（和旁边的 input 同名），于是保存时：
+        input 先写入路径 → button 后写入 "" （button.value 默认空串）→ 路径被清空，
+        用户选好目录、点了保存，落盘的却是空字符串，采集器一直报「未配置下载目录」。
+        """
+        self.nav("settings")
+        self.page.locator('.tab[data-sub="storage"]').click()
+        self.page.wait_for_timeout(120)
+        self.assertTrue(self.page.locator('[data-act="pick-folder"]').first.is_visible(),
+                        "存储设置里必须有「浏览」按钮")
+        collected = self.page.evaluate("""(() => {
+          const keeps = [];
+          document.querySelectorAll('#content [data-key]').forEach((node) => {
+            const tag = String(node.tagName || '').toLowerCase();
+            if (!['input', 'select', 'textarea'].includes(tag)) {
+              keeps.push(tag + ':' + node.dataset.key);
+            }
+          });
+          return keeps;
+        })()""")
+        self.assertEqual(collected, [],
+                         f"只有 input/select/textarea 能带 data-key，实际还有：{collected}")
+
+    def test_browse_button_does_not_clear_the_path_on_save(self):
+        """选好目录再保存，发出去的必须是那个目录，不能被「浏览」按钮覆盖成空。"""
+        self.nav("settings")
+        self.page.locator('.tab[data-sub="storage"]').click()
+        self.page.wait_for_timeout(120)
+        self.page.fill('[data-key="video_path"]', r"E:\ContentFactory\Videos")
+        self.page.locator('[data-act="settings-save"][data-section="storage"]').click()
+        self.page.wait_for_timeout(200)
+        call = self.page.evaluate(
+            "window.calls.filter(c=>c.name==='content_save_settings').pop()")
+        self.assertEqual(call["values"]["video_path"], r"E:\ContentFactory\Videos",
+                         "保存时 video_path 不能被「浏览」按钮覆盖成空字符串")
+
+    def test_all_four_local_paths_survive_a_save(self):
+        """四个本地路径字段（视频 / 封面 / 素材 / 临时）都要正确提交。"""
+        paths = {
+            "video_path": r"E:\ContentFactory\Videos",
+            "cover_path": r"E:\ContentFactory\Covers",
+            "library_path": r"E:\ContentFactory\Library",
+            "temp_path": r"E:\ContentFactory\Temp",
+        }
+        self.nav("settings")
+        self.page.locator('.tab[data-sub="storage"]').click()
+        self.page.wait_for_timeout(120)
+        for key, value in paths.items():
+            self.page.fill(f'[data-key="{key}"]', value)
+        self.page.locator('[data-act="settings-save"][data-section="storage"]').click()
+        self.page.wait_for_timeout(200)
+        call = self.page.evaluate(
+            "window.calls.filter(c=>c.name==='content_save_settings').pop()")
+        for key, value in paths.items():
+            self.assertEqual(call["values"][key], value, f"{key} 没有正确提交")
+
+    def test_pick_folder_writes_the_chosen_path_into_the_input(self):
+        """桥接返回的目录要写进对应的 input（不是写进按钮，也不是丢掉）。"""
+        self.nav("settings")
+        self.page.locator('.tab[data-sub="storage"]').click()
+        self.page.wait_for_timeout(120)
+        self.page.evaluate("""window.pywebview.api.content_factory.content_choose_folder =
+          async(kind)=>({ok:true, path:'E:\\\\Picked\\\\By\\\\Dialog', kind:kind})""")
+        row = self.page.locator('[data-act="pick-folder"]').first
+        row.click()
+        self.page.wait_for_timeout(250)
+        value = self.page.eval_on_selector('[data-key="video_path"]', "node => node.value")
+        self.assertEqual(value, r"E:\Picked\By\Dialog")
+        self.page.locator('[data-act="settings-save"][data-section="storage"]').click()
+        self.page.wait_for_timeout(200)
+        call = self.page.evaluate(
+            "window.calls.filter(c=>c.name==='content_save_settings').pop()")
+        self.assertEqual(call["values"]["video_path"], r"E:\Picked\By\Dialog",
+                         "浏览选中的目录要能原样保存")
+
     def test_ai_settings_expose_provider_model_key_and_prompt(self):
         self.nav("settings")
         self.page.locator('.tab[data-sub="ai"]').click()

@@ -1265,9 +1265,12 @@ function fieldTextarea(label, key, value, rows = 4, hint = '') {
       ${hint ? `<span class="hint">${esc(hint)}</span>` : ''}</div></div>`;
 }
 function fieldFolder(label, key, value, hint = '') {
+  // 按钮**不能**带 data-key：collectSettings 是按 [data-key] 收集的，按钮会被
+  // 当成一个设置字段，而 button.value 默认是空串 —— 它会紧跟在同名 input 之后
+  // 把刚选好的路径覆盖成 ""。所以按钮用 data-target-key 指向要填的输入框。
   return `<div class="field"><label class="lb">${esc(label)}</label>
     <div class="ctl"><input type="text" data-key="${esc(key)}" value="${esc(value || '')}" placeholder="选择目录">
-      <button class="btn sm" data-act="pick-folder" data-key="${esc(key)}">浏览</button>
+      <button class="btn sm" data-act="pick-folder" data-target-key="${esc(key)}">浏览</button>
       ${hint ? `<span class="hint">${esc(hint)}</span>` : ''}</div></div>`;
 }
 function fieldPassword(label, key, isSet, hint = '') {
@@ -1730,10 +1733,16 @@ renderers.library = (meta) => {
 
 /* ==================== 5. 动作绑定 ==================== */
 
-/** 收集设置表单：按 data-key 归类，多选字段收成数组，密钥留空表示不变。 */
+/** 收集设置表单：按 data-key 归类，多选字段收成数组，密钥留空表示不变。
+ *
+ * 选择器刻意收紧成 input/select/textarea：设置值只能来自真正的表单控件。
+ * 以前是 `[data-key]`，只要别的元素（例如「浏览」按钮）误加了 data-key，
+ * 就会被当成一个设置字段写进去 —— 实测把刚选好的目录覆盖成了空字符串。
+ */
 function collectSettings(section) {
   const values = {};
-  const nodes = document.querySelectorAll('#content [data-key]');
+  const nodes = document.querySelectorAll(
+    '#content input[data-key], #content select[data-key], #content textarea[data-key]');
   nodes.forEach((node) => {
     const key = node.dataset.key;
     if (!key) return;
@@ -2098,9 +2107,10 @@ const HANDLERS = {
     }
   },
   async 'pick-folder'(node) {
-    const result = await safeCall('content_choose_folder', node.dataset.key);
+    const key = node.dataset.targetKey || node.dataset.key;
+    const result = await safeCall('content_choose_folder', key);
     if (result && result.ok) {
-      const input = document.querySelector(`#content [data-key="${node.dataset.key}"]`);
+      const input = document.querySelector(`#content [data-key="${key}"]`);
       if (input) input.value = result.path;
     }
   },
