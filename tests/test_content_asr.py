@@ -791,7 +791,8 @@ class PipelineIntegrationTests(AsrEnvCase):
         folder.mkdir()
         (folder / "clip.mp4").write_bytes(b"x")
         (folder / "clip.srt").write_text(
-            "1\n00:00:01,000 --> 00:00:02,000\nAI is changing how we think about work.\n",
+            "1\n00:00:01,000 --> 00:00:02,000\n"
+            "AI is changing how we think about work, and the pace keeps accelerating.\n",
             encoding="utf-8")
         item_id = self.pipeline.create_from_local(folder)["ids"][0]
         result = self.pipeline.enrich_one(item_id)

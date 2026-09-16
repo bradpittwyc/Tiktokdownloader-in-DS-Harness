@@ -135,12 +135,18 @@ class OrchestratorCase(unittest.TestCase):
 
         文件名必须每条不同：create_from_local 用文件名当 source_video_id，
         同名会被去重成同一条内容（既有行为，这里顺着它走）。
+
+        字幕文本必须达到真实字幕的长度：AI 标注有一条「字幕过短就不浪费模型调用」
+        的业务规则（见 pipeline.MIN_TRANSCRIPT_CHARS），一行几个字的占位字幕会被
+        如实判为失败。这里给的是像样的句子，而不是为了凑长度的填充字符。
         """
         folder = self.root / f"videos{index}"
         folder.mkdir(exist_ok=True)
         (folder / f"clip{index}.mp4").write_bytes(b"x")
         (folder / f"clip{index}.srt").write_text(
-            f"1\n00:00:01,000 --> 00:00:02,000\nline {index} about AI\n", encoding="utf-8")
+            f"1\n00:00:01,000 --> 00:00:02,000\n"
+            f"line {index} about AI and how it is changing the way we work every day\n",
+            encoding="utf-8")
         item_id = self.pipeline.create_from_local(folder)["ids"][0]
         if not transcript:
             self.store.update_item(item_id, transcript_status="pending")
@@ -332,7 +338,8 @@ class StageExecutionTests(OrchestratorCase):
         media = self.root / "chain.mp4"
         media.write_bytes(b"x")
         subtitle = self.root / "chain.srt"
-        subtitle.write_text("1\n00:00:01,000 --> 00:00:02,000\nAI is changing work.\n",
+        subtitle.write_text("1\n00:00:01,000 --> 00:00:02,000\n"
+                            "AI is changing work, and it is changing how we plan our careers.\n",
                             encoding="utf-8")
         downloader = FakeDownloader({"localVideoPath": str(media),
                                      "localSubtitlePath": str(subtitle)})
@@ -373,7 +380,8 @@ class StageExecutionTests(OrchestratorCase):
         ids = [self.local_item(index) for index in range(3)]
         for item_id in ids:
             self.store.update_item(item_id, transcript_status="done")
-            self.pipeline.set_transcript(item_id, "some transcript text")
+            self.pipeline.set_transcript(
+                item_id, "some transcript text that is long enough to be annotated properly")
         orchestrator.submit_many(ids, stages=("enrich",))
         orchestrator.start(recover=False)
         try:
@@ -534,7 +542,8 @@ class RestartRecoveryTests(OrchestratorCase):
         first = self.make()
         ids = [self.local_item(1), self.local_item(2)]
         for item_id in ids:
-            self.pipeline.set_transcript(item_id, "hello world transcript for restart")
+            self.pipeline.set_transcript(
+                item_id, "hello world transcript for the restart case, long enough to annotate")
             first.submit(item_id, "enrich")
         self.assertEqual(first.counts()["queued"], 2)
         first.stop()
