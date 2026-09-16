@@ -55,7 +55,8 @@ python outputs/TikTokBatchMVP/web_app.py
 
 想先看效果又没有真实数据：首页点「生成演示数据」。想跑真实 AI 标注：
 `设置 → AI 加工设置` 填 API Key → `测试连接` → 回 `AI 加工` 点「重新分析」。
-详细说明见 [docs/content-factory.md](docs/content-factory.md)。
+详细说明见 [docs/content-factory.md](docs/content-factory.md)；
+外部服务配置与密钥管理见 [docs/provider-config.md](docs/provider-config.md)。
 
 ## 构建
 
@@ -82,14 +83,15 @@ installer\build.ps1 -Installer
 python -m unittest discover -s tests -t tests -v
 ```
 
-301 个测试，全部离线（`-t tests` 不能省）。其中 `test_login_ui.py` /
+416 个测试，全部离线（`-t tests` 不能省）。其中 `test_login_ui.py` /
 `test_continue_ui.py` / `test_status_ui.py` / `test_open_profile_ui.py` 用真实浏览器加载
 `ui/index.html` 并注入假的 `window.pywebview.api`，断言零 JS 运行时错误；
 `test_content_factory_ui.py` 用同样方式守住新的内容工厂外壳
 （9 个主页面 + 7 个设置子页切换零报错）。
 
 内容工厂相关：`test_content_factory.py`（服务层）、`test_content_bridge.py`（桥接暴露面契约）、
-`test_content_download_handoff.py`（下载 → 内容库交接）、`test_content_factory_ui.py`（外壳界面）。
+`test_content_download_handoff.py`（下载 → 内容库交接）、`test_content_factory_ui.py`（外壳界面）、
+`test_provider_config.py`（provider 配置 / 密钥 / 连接测试 / fail-closed / 旧密钥迁移）。
 
 ## 目录
 
@@ -98,11 +100,13 @@ outputs/TikTokBatchMVP/   应用源码（web_app.py 为入口）
   ui/app.html             内容工厂外壳（v2 主界面）
   ui/index.html           原下载器（作为「视频库」页内嵌，未改动）
   content_factory/        内容工厂服务层（sqlite / 设置 / AI 标注 / 转写 / 编排）
+    providers/            统一 Provider 配置 + 凭据库 + 连接测试（厂商差异全是数据）
   content_bridge.py       下载器 ↔ 内容工厂的桥接层
 installer/                PyInstaller spec、Inno Setup 脚本、打包自检
 tests/                    测试
 scripts/capture_ui.py     开发期截图工具（对照参考图用）
 docs/content-factory.md   内容工厂架构、数据模型、API 契约、踩坑记录
+docs/provider-config.md   Provider 契约、密钥存储策略、连接测试与集成点
 docs/ui-references/       UI 参考图（14 张）
 docs/ui-screenshots/      实现截图（15 张）
 架构与问题.md              原下载器的架构说明、问题清单与实测记录
