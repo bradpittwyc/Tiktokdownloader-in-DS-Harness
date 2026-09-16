@@ -220,9 +220,25 @@ a { color: var(--blue); text-decoration: none; }
 .g-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .g-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .g-main { grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr); }
+/* AI 加工页：队列 8 列但内容短，标注结果面板才是阅读主体。
+   比例取 2.2 : 1（实测 2.9 : 1 时结果面板只剩约 295px，「子主题/推荐练习任务」
+   都被挤到换行，读起来很难受）。队列过宽的部分交给 .table-scroll 横向滚动。 */
+.g-queue { grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); }
 @media (max-width: 1180px) {
   .g-6, .g-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .g-main, .g-3, .g-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* 右栏（AI 标注结果）是这一页的主角，窗口不宽时也**不要**把它挤到下面去：
+   实测 150% DPI 的 1080p 屏上，窗口只能拿到约 1050 CSS 像素（内容区约 800），
+   一旦按通用断点折叠成单列，标注结果就掉到首屏之外 —— 用户点了「查看」却看不到
+   任何变化，会以为按钮坏了。
+   所以：先压缩比例，很窄时才折叠，而且折叠后把结果面板排到队列**前面**。 */
+@media (max-width: 1080px) {
+  .g-queue { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .g-queue { grid-template-columns: minmax(0, 1fr); }
+  .g-queue > .card:last-child { order: -1; }
 }
 
 /* ---------- 统计卡 ---------- */

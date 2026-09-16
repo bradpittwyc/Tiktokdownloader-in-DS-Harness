@@ -266,6 +266,8 @@ class FactoryStore:
         row["has_transcript"] = bool(str(row.get("transcript_text") or "").strip())
         row["transcript_chars"] = len(str(row.get("transcript_text") or ""))
         row["content_key"] = content_key(row.get("source_type"), row.get("source_video_id"))
+        # 界面上「资源与状态」要显示模型原始返回的长度（排查解析问题时有用的第一手信息）
+        row["raw_length"] = len(str((enrichment or {}).get("raw_response") or ""))
         return row
 
     def counts(self):

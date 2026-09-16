@@ -322,10 +322,41 @@ class AiPageTests(ShellUITestCase):
     def test_enrichment_result_is_rendered(self):
         self.nav("ai")
         text = self.page.locator("#content").inner_text()
-        for expected in ["AI 标注结果", "AI 科技", "B2", "美音", "偏快",
+        for expected in ["本次 AI 加工内容", "内容分析结果", "AI 科技", "B2", "美音", "偏快",
                          "the cost of thinking is collapsing", "重点句", "whether 引导宾语从句",
-                         "复述", "deepseek-chat"]:
+                         "复述", "deepseek-chat", "资源与状态"]:
             self.assertIn(expected, text, f"AI 标注结果里缺少：{expected}")
+
+    def test_queue_shows_the_annotation_columns(self):
+        """队列列结构对齐参考图：转写 / AI 标签 / 表达提取 / 生成学习内容。"""
+        self.nav("ai")
+        header = self.page.locator("#content table thead").inner_text()
+        for expected in ["视频信息", "创作者", "转写", "AI 标签", "表达 / 语法",
+                         "标注结果", "状态", "操作"]:
+            self.assertIn(expected, header, f"队列表头缺少：{expected}")
+
+    def test_long_lists_can_be_expanded(self):
+        """重点表达默认只露 3 条，点「查看全部」要能展开（参考图里的折叠行为）。"""
+        self.tearDown()
+        many = dict(ITEM)
+        many["enrichment"] = dict(ENRICHMENT)
+        many["enrichment"]["expressions"] = [
+            {"text": f"expression number {i}", "meaning_zh": f"表达 {i}"} for i in range(6)]
+        self.items = [many]
+        self.setUp()
+        self.nav("ai")
+        text = self.page.locator("#content").inner_text()
+        self.assertIn("expression number 0", text)
+        self.assertNotIn("expression number 5", text, "默认应收起超出的条目")
+        self.page.locator('[data-act="ai-expand"][data-expand="expressions"]').click()
+        self.page.wait_for_timeout(140)
+        self.assertIn("expression number 5", self.page.locator("#content").inner_text())
+
+    def test_processing_log_and_model_panel_are_present(self):
+        self.nav("ai")
+        text = self.page.locator("#content").inner_text()
+        for expected in ["Prompt / 模型处理日志", "组装 Prompt", "写入内容库", "模型与资源状态"]:
+            self.assertIn(expected, text)
 
     def test_failed_item_shows_the_reason_and_a_retry(self):
         self.nav("ai")
