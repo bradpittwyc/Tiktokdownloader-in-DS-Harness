@@ -76,6 +76,70 @@ DEFAULT_PROMPT_TEMPLATE = """你是英语教学内容分析专家。下面是一
 """
 
 
+def describe_http_error(exc, config=None):
+    """把底层 HTTP 异常翻译成一句用户能照着做的话。
+
+    实测（真实 DeepSeek 接口，错误 Key / 错误模型 / 错误地址各试一次）原始异常长这样：
+        400 Client Error: Bad Request for url: https://api.deepseek.com/v1/chat/completions
+        401 Client Error: Authorization Required for url: ...
+        404 Client Error: Not Found for url: ...
+    这些话直接写进 last_error 显示在界面上，用户既不知道问题出在哪，也不知道改什么。
+    所以按状态码给出可执行的提示，并在拿得到时附上服务端自己的错误说明。
+
+    不抛异常：翻译失败就退回原始字符串，宁可难看也不能丢信息。
+    """
+    config = config or {}
+    status = None
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None)
+    text = str(exc)
+    if status is None:
+        matched = re.search(r"\b(4\d{2}|5\d{2})\b", text)
+        status = int(matched.group(1)) if matched else None
+
+    detail = ""
+    if response is not None:
+        try:
+            body = response.json()
+            if isinstance(body, dict):
+                error = body.get("error")
+                if isinstance(error, dict):
+                    detail = str(error.get("message") or "")[:160]
+                elif error:
+                    detail = str(error)[:160]
+                else:
+                    detail = str(body.get("message") or "")[:160]
+        except Exception:
+            detail = ""
+
+    if status in (401, 403):
+        advice = ("API Key 无效或没有权限：请到「设置 → AI 加工设置」检查 API Key"
+                  "（注意别把地址填进 Key、别带多余空格）")
+    elif status == 402 or status == 429:
+        advice = ("额度不足或请求过于频繁：请检查账户余额，稍后重试，"
+                  "或把批处理大小调小")
+    elif status == 404:
+        advice = ("接口地址不对：请检查「设置 → AI 加工设置」里的 API 地址"
+                  "（应形如 https://api.deepseek.com/v1，不要带 /chat/completions）")
+    elif status == 400:
+        advice = ("请求被拒绝：通常是模型名或参数不对，"
+                  "请在「设置 → AI 加工设置」核对主模型名称与最大 Token 数")
+    elif status and 500 <= status < 600:
+        advice = f"服务端错误（{status}）：通常是服务商临时故障，稍后重试即可"
+    elif status:
+        advice = f"请求失败（HTTP {status}）"
+    else:
+        return f"{type(exc).__name__}: {text}"[:300]
+
+    head = f"{advice}。"
+    if detail:
+        head += f"服务端说明：{detail}"
+    else:
+        head += f"（原始信息：{text[:120]}）"
+    return head[:500]
+
+
 class EnrichmentError(RuntimeError):
     """模型调用或解析最终失败。"""
 
@@ -325,8 +389,18 @@ class EnrichmentService:
             json=payload,
             timeout=240,
         )
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            # 网络层的原始报错（400/401/404...）对用户没有指导意义，
+            # 在这里翻译成可执行的中文提示后再往上抛
+            raise EnrichmentError(describe_http_error(exc, config)) from exc
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise EnrichmentError(
+                f"服务端返回的不是 JSON（HTTP {getattr(response, 'status_code', '?')}）："
+                f"{str(exc)[:120]}") from exc
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -339,12 +413,21 @@ class EnrichmentService:
         try:
             text = self._post(config, [{"role": "user", "content": "Reply with OK"}], max_tokens=8)
             return {"ok": True, "message": str(text)[:80], "model": config["model"]}
+        except EnrichmentError as exc:
+            return {"ok": False, "error": str(exc)}
         except Exception as exc:
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"ok": False, "error": describe_http_error(exc, config)}
 
     # ---- 主入口 --------------------------------------------------------
     def enrich(self, item, transcript):
-        """返回 (归一化结果, raw_text, raw_json, 重试次数)。失败抛 EnrichmentError。"""
+        """返回 (归一化结果, raw_text, raw_json, 重试次数)。失败抛 EnrichmentError。
+
+        两种情况要分开：
+        - 模型**没答成**（HTTP 报错）：重试一次没意义，直接把翻译好的原因抛出去，
+          否则用户会为「Key 无效」白等两轮请求。
+        - 模型答了但**不是合法 JSON**：重试一次并明确要求「只输出 JSON」，
+          这是实测里唯一真正靠重试救得回来的情况。
+        """
         config = self.config()
         if not config["api_key"]:
             raise EnrichmentError("未配置 API Key：请在「设置 → AI 加工设置」中填写后重试")
@@ -360,8 +443,15 @@ class EnrichmentService:
                         "不要任何解释与 Markdown 围栏。\n\n" + prompt)
                     raw_text = self._post(config, [{"role": "system", "content": system},
                                                    {"role": "user", "content": user}])
+                except EnrichmentError as exc:
+                    # 请求本身失败（HTTP/网络）—— 重试同样会失败，直接返回原因
+                    raise
+                except Exception as exc:
+                    last_error = exc
+                    break
+                try:
                     normalized, payload = parse_enrichment(raw_text)
                     return normalized, raw_text, payload, attempts
                 except Exception as exc:
                     last_error = exc
-        raise EnrichmentError(f"AI 标注失败：{last_error}")
+        raise EnrichmentError(str(last_error))

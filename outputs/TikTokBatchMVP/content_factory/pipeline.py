@@ -20,6 +20,15 @@ from .transcript import (ASRUnavailable, asr_available, clean_transcript,
 
 VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".mov", ".avi")
 
+# 字幕太短就标不出东西。
+#
+# 实测：一条只有 17 个字符的字幕（"(demo transcript)" 这种占位文本）也照样发给了模型，
+# 模型"很配合地"返回了一份标注：主题是标题、learning_value 0.4、
+# expressions 里甚至把占位文字当成地道表达提了出来。用户看到的是一份看着像模像样、
+# 实际毫无价值的结果 —— 比直接报错更糟，因为它会被当成真结果用下去。
+# 所以低于这个长度直接判失败并说明原因，让用户去补字幕或改手工文本。
+MIN_TRANSCRIPT_CHARS = 40
+
 # 分析阶段 -> 界面文案
 STAGE_LABELS = {
     "download": "下载",
@@ -201,6 +210,15 @@ class ContentPipeline:
         if not ok:
             self.store.set_ai_status(item_id, "failed", reason)
             return {"ok": False, "error": reason}
+
+        # 输入太短就别浪费一次模型调用，也别产出看着像结果的东西
+        length = len(str(transcript or "").strip())
+        if length < MIN_TRANSCRIPT_CHARS:
+            reason = (f"字幕文本过短（{length} 字符，至少要 {MIN_TRANSCRIPT_CHARS} 字符），"
+                      "标注不出有效内容。请先补全字幕，或在「编辑字幕文本」里手工粘贴完整文本")
+            self.store.set_ai_status(item_id, "failed", reason)
+            self._report(item_id, "failed", reason, stage="enrich")
+            return {"ok": False, "error": reason, "tooShort": True}
 
         self.store.set_ai_status(item_id, "running")
         self._report(item_id, "running", "AI 正在分析内容…", stage="enrich")
