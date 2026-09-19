@@ -133,6 +133,28 @@ def upload_date_matches(stamp, name):
                for offset in (1, -1))
 
 
+def extract_section(markdown, heading):
+    """从模型回复的 Markdown 里抠出某一个 `## 章节`（含标题行）。
+
+    从 `## <heading>` 起，到下一个同级 `## `（或文档结束）为止。
+    找不到就返回空串 —— 调用方据此**不写文件**，而不是留一个空壳让人以为
+    "生成了但没内容"。
+    """
+    lines = str(markdown or "").replace("\r\n", "\n").split("\n")
+    collected, inside = [], False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            title = stripped[3:].strip()
+            if inside:
+                break                      # 到了下一个同级标题，收工
+            if title == str(heading).strip():
+                inside = True
+                collected.append(stripped)
+                continue
+        if inside:
+            collected.append(line.rstrip())
+    return "\n".join(collected).strip()
 
 
 def page_challenged(page):
@@ -257,7 +279,7 @@ class Api:
 
     def _load_learning_options(self):
         defaults = {"enabled": False, "translation": True, "vocabulary": True,
-                    "timestamps": True, "provider": DEFAULT_PROVIDER,
+                    "timestamps": True, "grammar": True, "provider": DEFAULT_PROVIDER,
                     "api_base": "https://api.openai.com/v1",
                     "model": "gpt-4o-mini", "api_key": ""}
         try:
@@ -319,6 +341,7 @@ class Api:
             "translation": bool(options.get("translation", True)),
             "vocabulary": bool(options.get("vocabulary", True)),
             "timestamps": bool(options.get("timestamps", True)),
+            "grammar": bool(options.get("grammar", True)),
             "provider": str(options.get("provider") or current.get("provider")
                             or DEFAULT_PROVIDER).strip(),
             "api_base": str(options.get("api_base") or "https://api.openai.com/v1").strip().rstrip("/"),
@@ -482,7 +505,26 @@ class Api:
                         "提炼重点词汇、音标/词性、中文义和例句" if opts["vocabulary"] else "不需要词汇表",
                         "讲解高价值句型、固定搭配和可模仿表达"]
             if opts["timestamps"]: sections.append("按内容段落标出对应时间码；字幕中没有时间码时按段落编号")
-            prompt = "请基于以下 TikTok 英文字幕生成一份适合中国学习者的 Markdown 学习文档。" + "；".join(sections) + "。第一行必须是 # 后跟完整、自然、能概括视频主题的英文标题；自己根据字幕判断标题，不能截断，也不要复述文件名。后续严格使用：## 视频主题、## 英文原文、## 中文对照、## 重点词汇、## 句型与表达、## 跟读练习。英文原文和中文对照均按自然段连续书写，绝对不要按字幕逐行换行；只有跟读练习按短句逐行排列。不要编造字幕里不存在的内容。\n\n字幕：\n" + text[:30000]
+            if opts.get("grammar"):
+                sections.append("标注语法点：每个语法点给出原句、结构拆解、中文说明和一句仿写")
+            # ⚠️ 章节清单**必须跟着勾选项走**。原来是写死的六节，于是用户取消
+            # "中文对照"之后，提示词一边说"不需要中文翻译"、一边又要求输出
+            # `## 中文对照` —— 自相矛盾的指令，模型只能猜。
+            headings = ["## 视频主题", "## 英文原文"]
+            if opts["translation"]: headings.append("## 中文对照")
+            if opts["vocabulary"]: headings.append("## 重点词汇")
+            headings.append("## 句型与表达")
+            if opts.get("grammar"): headings.append("## 语法点")
+            headings.append("## 跟读练习")
+            # 同一处毛病：末尾那句排版要求原来也写死了"中文对照"。
+            flowing = "英文原文和中文对照均按自然段连续书写" if opts["translation"] else "英文原文按自然段连续书写"
+            prompt = ("请基于以下 TikTok 英文字幕生成一份适合中国学习者的 Markdown 学习文档。"
+                      + "；".join(sections)
+                      + "。第一行必须是 # 后跟完整、自然、能概括视频主题的英文标题；自己根据字幕判断标题，不能截断，也不要复述文件名。后续严格使用："
+                      + "、".join(headings)
+                      + "。" + flowing
+                      + "，绝对不要按字幕逐行换行；只有跟读练习按短句逐行排列。不要编造字幕里不存在的内容。\n\n字幕：\n"
+                      + text[:30000])
             document = self._call_learning_model(prompt)
             generated_title = next((line[2:].strip() for line in document.splitlines() if line.startswith("# ")), item.get("title") or "英文学习")
             title = re.sub(r'[<>:"/\\|?*]+', '_', generated_title).strip(" .")[:140] or "英文学习"
@@ -491,9 +533,38 @@ class Api:
             base = media_files[0].stem if media_files else f"{title}_{stamp}"
             output = Path(target) / f"{base}.docx"
             self._write_learning_docx(document, output, item)
-            self._emit("learningProgress", {"id": item["id"], "state": "done", "path": str(output), "message": "英文学习文档已保存"})
+            grammar_path = None
+            if opts.get("grammar"):
+                try:
+                    grammar_path = self._write_grammar_markdown(document, Path(target) / f"{base}.grammar.md")
+                except Exception as exc:
+                    # 语法点是附加产物，它失败不该把已经生成好的 docx 变成失败
+                    log_event(f"语法点标注文件保存失败 {item.get('id')}: {exc}")
+            message = "英文学习文档已保存" + (f"；语法点 {grammar_path.name}" if grammar_path else "")
+            self._emit("learningProgress", {"id": item["id"], "state": "done", "path": str(output),
+                                            "grammarPath": str(grammar_path) if grammar_path else "",
+                                            "message": message})
         except Exception as exc:
             self._emit("learningProgress", {"id": item["id"], "state": "failed", "message": str(exc)})
+
+    @staticmethod
+    def _write_grammar_markdown(document, output):
+        """把模型回复里的 `## 语法点` 章节单独存成 .md。
+
+        模型返回的**本来就是 Markdown**（docx 只是它的另一种排版），
+        所以这一步**不额外调用模型、不额外花钱**。
+
+        抠不出语法点章节就返回 None、不写文件 —— 宁可不产出，
+        也不要留一个空壳让人以为"生成了但没内容"。
+        """
+        section = extract_section(document, "语法点")
+        if not section:
+            return None
+        title = next((line[2:].strip() for line in str(document or "").splitlines()
+                      if line.startswith("# ")), "")
+        header = f"# {title} — 语法点\n\n" if title else "# 语法点\n\n"
+        Path(output).write_text(header + section + "\n", encoding="utf-8")
+        return Path(output)
 
     def _queue_learning_document(self, item, target, subtitle_paths):
         if self._learning.get("enabled") and self._api_key() and subtitle_paths:

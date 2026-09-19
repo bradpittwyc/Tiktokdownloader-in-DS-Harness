@@ -432,6 +432,30 @@ class AssetsUITest(unittest.TestCase):
         self.assertTrue(self.page.locator("#clearLearningKey").is_visible(),
                         "已经配了密钥就该给出显式的清除入口")
 
+    def test_the_learning_options_include_the_grammar_checkbox(self):
+        self.open_ai_module()
+        labels = self.page.eval_on_selector_all(
+            ".learning-checks label", "els => els.map(e => e.textContent.trim())")
+        self.assertEqual(len(labels), 4, labels)
+        self.assertTrue(any("语法点" in text for text in labels), labels)
+        self.assertTrue(self.page.is_checked("#learnGrammar"), "默认应该勾上")
+        self.assertIn("md", " ".join(labels), "标签上要写清楚会另存 .md")
+
+    def test_the_grammar_checkbox_is_sent_to_the_backend(self):
+        self.open_ai_module()
+        self.page.uncheck("#learnGrammar")
+        self.assertFalse(self.page.evaluate("learningInput().grammar"))
+        self.page.check("#learnGrammar")
+        self.assertTrue(self.page.evaluate("learningInput().grammar"))
+
+    def test_the_grammar_checkbox_reflects_the_saved_value(self):
+        self.page.evaluate(
+            "window.learningOptions={apiKeySet:true,keyEncrypted:true,grammar:false,"
+            "provider:'openai',api_base:'https://api.openai.com/v1',model:'gpt-4o-mini'}")
+        self.open_ai_module(key_configured=False)
+        self.page.wait_for_function("document.getElementById('learnGrammar').checked===false")
+        self.assertEqual(self.errors, [])
+
     def test_clearing_the_key_calls_the_backend_and_updates_the_note(self):
         self.open_ai_module()
         self.page.locator("#clearLearningKey").click()

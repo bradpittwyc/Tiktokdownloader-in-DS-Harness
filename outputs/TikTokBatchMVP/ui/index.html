@@ -97,7 +97,7 @@
         <div class="setting-row"><label>API Key</label><input id="learningKey" type="password" placeholder="sk-..."><button type="button" id="clearLearningKey" class="btn hidden">清除</button></div>
         <div class="setting-row"><label>密钥存储</label><span class="settings-hint" id="learningKeyState">尚未配置</span></div>
         <div class="learning-api-actions"><button type="button" id="testLearningApi" class="btn">测试连接</button><span id="learningApiState"></span></div>
-        <div class="learning-section"><div class="learning-title">英文学习文档</div><label class="learning-toggle"><input id="learningEnabled" type="checkbox"> 下载完成后自动生成英文学习文档</label><div class="learning-checks"><label><input id="learnTranslation" type="checkbox" checked> 中文对照</label><label><input id="learnVocabulary" type="checkbox" checked> 词汇表</label><label><input id="learnTimestamps" type="checkbox" checked> 段落时间码</label></div></div>
+        <div class="learning-section"><div class="learning-title">英文学习文档</div><label class="learning-toggle"><input id="learningEnabled" type="checkbox"> 下载完成后自动生成英文学习文档</label><div class="learning-checks"><label><input id="learnTranslation" type="checkbox" checked> 中文对照</label><label><input id="learnVocabulary" type="checkbox" checked> 词汇表</label><label><input id="learnTimestamps" type="checkbox" checked> 段落时间码</label><label><input id="learnGrammar" type="checkbox" checked> 语法点标注（另存 .md）</label></div></div>
       </section>
 
       <section class="settings-module" data-module="storage">
@@ -366,7 +366,7 @@
     await Promise.allSettled([
       window.pywebview.api.get_cookie_status().then(state=>{if(statusRevision===cookieRevision)cookieStatus(state)}).catch(error=>{if(statusRevision===cookieRevision)cookieFailure(error)}),
       window.pywebview.api.get_filename_template().then(value=>{if(revision===settingsOpenRevision)$('filenameTemplate').value=value}).catch(()=>{$('settingsMessage').textContent='读取命名设置失败，请重新打开设置';$('settingsMessage').classList.add('error')}),
-      window.pywebview.api.get_learning_options().then(l=>{if(revision!==settingsOpenRevision)return;$('learningEnabled').checked=!!l.enabled;$('learnTranslation').checked=l.translation!==false;$('learnVocabulary').checked=l.vocabulary!==false;$('learnTimestamps').checked=l.timestamps!==false;$('learningProvider').value=l.provider||'openai';$('learningBase').value=l.api_base||'https://api.openai.com/v1';$('learningModel').value=l.model||'gpt-4o-mini';$('learningKey').value='';$('learningKey').placeholder=l.apiKeySet?'已保存，留空不修改':'sk-...';learningKeySet=!!l.apiKeySet;learningKeyEncrypted=!!l.keyEncrypted;settingsKeyState();$('learningApiState').textContent=l.apiKeySet?'API Key 已保存':''}).catch(()=>{$('learningApiState').textContent='读取学习设置失败'})
+      window.pywebview.api.get_learning_options().then(l=>{if(revision!==settingsOpenRevision)return;$('learningEnabled').checked=!!l.enabled;$('learnTranslation').checked=l.translation!==false;$('learnVocabulary').checked=l.vocabulary!==false;$('learnTimestamps').checked=l.timestamps!==false;$('learnGrammar').checked=l.grammar!==false;$('learningProvider').value=l.provider||'openai';$('learningBase').value=l.api_base||'https://api.openai.com/v1';$('learningModel').value=l.model||'gpt-4o-mini';$('learningKey').value='';$('learningKey').placeholder=l.apiKeySet?'已保存，留空不修改':'sk-...';learningKeySet=!!l.apiKeySet;learningKeyEncrypted=!!l.keyEncrypted;settingsKeyState();$('learningApiState').textContent=l.apiKeySet?'API Key 已保存':''}).catch(()=>{$('learningApiState').textContent='读取学习设置失败'})
     ]);
   }
   $('loginTikTok').onclick=async()=>{
@@ -383,7 +383,7 @@
     try{const result=await window.pywebview.api.set_cookie_options('','chrome');cookieStatus(result);$('cookieBrowser').value='chrome';$('cookieFile').value='';prefs={...prefs,cookieFile:'',cookieBrowser:'chrome'};savePreferences();setStatus($('cookieStatus').textContent)}catch(error){cookieFailure(error)}finally{cookieActionPending=false;syncCookieControls()}
   };
   $('settingsCancel').onclick=()=>{settingsOpenRevision++;$('settingsModal').classList.add('hidden')};
-  function learningInput(){return {enabled:$('learningEnabled').checked,translation:$('learnTranslation').checked,vocabulary:$('learnVocabulary').checked,timestamps:$('learnTimestamps').checked,provider:$('learningProvider').value,api_base:$('learningBase').value.trim(),api_key:$('learningKey').value.trim(),model:$('learningModel').value.trim()}}
+  function learningInput(){return {enabled:$('learningEnabled').checked,translation:$('learnTranslation').checked,vocabulary:$('learnVocabulary').checked,timestamps:$('learnTimestamps').checked,grammar:$('learnGrammar').checked,provider:$('learningProvider').value,api_base:$('learningBase').value.trim(),api_key:$('learningKey').value.trim(),model:$('learningModel').value.trim()}}
   // 三家都是 OpenAI 兼容接口，切提供方就是换 base + 模型名。
   const AI_PRESETS={openai:{api_base:'https://api.openai.com/v1',model:'gpt-4o-mini'},deepseek:{api_base:'https://api.deepseek.com/v1',model:'deepseek-chat'},custom:null};
   $('learningProvider').onchange=()=>{const preset=AI_PRESETS[$('learningProvider').value];if(!preset)return;$('learningBase').value=preset.api_base;$('learningModel').value=preset.model;};
