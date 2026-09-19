@@ -28,6 +28,7 @@ from yt_dlp.networking.impersonate import ImpersonateTarget
 from playwright.sync_api import sync_playwright
 
 from app import clean_profile_url, find_chrome
+from ai_credentials import DpapiSecret
 # 素材工厂的地基（落盘约定、文件分类、元数据 schema）独立成模块，
 # 好让素材库/转码/切片这些后续功能能脱离 Api 直接引用，也方便离线测试。
 from asset_index import (
@@ -222,6 +223,8 @@ class Api:
         self._login_busy = False
         self._login_process = None
         self._session_store = SessionStore()
+        # 必须在 _load_learning_options() 之前建好 —— 那个函数会把旧的明文 Key 搬进来
+        self._credentials = DpapiSecret()
         self._session_user_agent = ""
         self._filename_template = self._load_filename_template()
         self._learning = self._load_learning_options()
@@ -262,20 +265,55 @@ class Api:
             if isinstance(saved, dict): defaults.update(saved)
         except Exception:
             pass
+        self._migrate_plaintext_key(defaults)
         return defaults
+
+    def _migrate_plaintext_key(self, options):
+        """把旧版本明文写在 learning.json 里的 API Key 搬进 DPAPI。
+
+        只有**见到明文**才动手，而且成功之后立刻把文件里的那一格抹掉。
+        搬不动（DPAPI 不可用、磁盘只读）就原样留着 —— 宁可暂时还是明文，
+        也不能因为迁移失败把用户的 Key 弄丢，那会让功能直接不可用。
+        """
+        plaintext = str(options.get("api_key") or "").strip()
+        if not plaintext:
+            return False
+        try:
+            self._credentials.set(plaintext)
+            options["api_key"] = ""
+            payload = dict(options)
+            payload["api_key"] = ""
+            self._learning_file().write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            log_event("已把 API Key 从 learning.json 的明文迁移到 DPAPI")
+            return True
+        except Exception as exc:
+            log_event(f"API Key 迁移到 DPAPI 失败，暂留明文：{exc}")
+            return False
+
+    def _api_key(self):
+        """当前可用的 API Key，读不出来就是空串。
+
+        加密文件优先，明文字段只是还没迁移成功的兜底。
+        """
+        return self._credentials.get() or str(self._learning.get("api_key") or "").strip()
 
     def get_learning_options(self):
         value = dict(self._learning)
         value["api_key"] = ""
-        value["apiKeySet"] = bool(self._learning.get("api_key"))
+        value["apiKeySet"] = bool(self._api_key())
+        value["keyEncrypted"] = self._credentials.has()
         return value
 
     def set_learning_options(self, options):
         options = options or {}
         current = self._learning
         key = str(options.get("api_key") or "").strip()
+        # 密钥进 DPAPI，**永远不写进 learning.json**。
+        # 留空 = 不修改（前端每次都把输入框清空，不能因此把已存的 Key 抹掉）。
         if key:
-            current["api_key"] = key
+            self._credentials.set(key)
+            current["api_key"] = ""
         current.update({
             "enabled": bool(options.get("enabled")),
             "translation": bool(options.get("translation", True)),
@@ -286,12 +324,22 @@ class Api:
             "api_base": str(options.get("api_base") or "https://api.openai.com/v1").strip().rstrip("/"),
             "model": str(options.get("model") or "gpt-4o-mini").strip(),
         })
-        self._learning_file().write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+        # 落盘前再抹一次 api_key：旧版本留下的明文必须在这一步被清掉
+        payload = dict(current)
+        payload["api_key"] = ""
+        current["api_key"] = ""
+        self._learning_file().write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         return self.get_learning_options()
+
+    def clear_learning_api_key(self):
+        """显式清除密钥。留空是"不修改"，清除必须是一个单独的动作。"""
+        removed = self._credentials.remove()
+        self._learning["api_key"] = ""
+        return {"ok": True, "removed": removed}
 
     def test_learning_api(self, options):
         self.set_learning_options(options)
-        if not self._learning.get("api_key"):
+        if not self._api_key():
             return {"ok": False, "error": "请先填写 API Key"}
         try:
             text = self._call_learning_model("Reply with OK", max_tokens=8)
@@ -306,10 +354,13 @@ class Api:
         三家都是 OpenAI 兼容接口，所以这里只有一份实现。
         """
         endpoint = resolve_endpoint(self._learning.get("api_base"))
+        api_key = self._api_key()
         if not endpoint:
             raise RuntimeError("没有配置 API 地址")
+        if not api_key:
+            raise RuntimeError("没有配置 API Key")
         response = requests.post(endpoint, headers={
-            "Authorization": f"Bearer {self._learning['api_key']}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"}, json={
                 "model": self._learning["model"], "temperature": temperature,
                 "max_tokens": max_tokens, "messages": messages}, timeout=180)
@@ -445,7 +496,7 @@ class Api:
             self._emit("learningProgress", {"id": item["id"], "state": "failed", "message": str(exc)})
 
     def _queue_learning_document(self, item, target, subtitle_paths):
-        if self._learning.get("enabled") and self._learning.get("api_key") and subtitle_paths:
+        if self._learning.get("enabled") and self._api_key() and subtitle_paths:
             threading.Thread(target=self._generate_learning_document, args=(item, target, subtitle_paths), daemon=True).start()
 
     def set_cookie_options(self, cookie_file="", browser=""):
@@ -1325,8 +1376,8 @@ class Api:
         **不联网取数据**：标签只用本地已有的东西 —— meta.json 里的标题与文案，
         加上旁边的字幕。所以**必须先补齐**，没有 meta 的素材会跳过并计数。
         """
-        if not self._learning.get("api_key"):
-            return {"ok": False, "error": "请先在「设置 → 学习文档」里填 AI 的 API Key"}
+        if not self._api_key():
+            return {"ok": False, "error": "请先在「设置 → AI 大模型」里填 AI 的 API Key"}
         assets, _ = scan_assets(folder)
         wanted = {str(Path(path)) for path in (paths or []) if str(path or "").strip()}
         if wanted:
@@ -2271,7 +2322,7 @@ class Api:
             paths = [str(path) for path in tracks]
             if not paths:
                 return {"ok": False, "error": "该作品没有可下载的字幕轨"}
-            if not self._learning.get("enabled") or not self._learning.get("api_key"):
+            if not self._learning.get("enabled") or not self._api_key():
                 return {"ok": True, "subtitles": paths, "message": "字幕已刷新；请在设置中启用并配置学习文档 API"}
             threading.Thread(target=self._generate_learning_document, args=(item, target, paths), daemon=True).start()
             return {"ok": True, "subtitles": paths, "message": "字幕已刷新，正在生成学习文档"}

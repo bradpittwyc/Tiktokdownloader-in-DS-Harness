@@ -25,6 +25,7 @@ $requiredFiles = @(
     (Join-Path $appRoot "profile_pagination.py"),
     (Join-Path $appRoot "asset_index.py"),
     (Join-Path $appRoot "ai_tagging.py"),
+    (Join-Path $appRoot "ai_credentials.py"),
     (Join-Path $appRoot "ui\index.html"),
     (Join-Path $appRoot "ui\tiktok-logo.png"),
     $specPath,

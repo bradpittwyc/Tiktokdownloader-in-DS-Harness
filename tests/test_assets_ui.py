@@ -61,7 +61,7 @@ window.calls = [];
 window.scanResult = %s;
 window.backfillResult = {ok:true, updated:7, examined:9, failed:[], folder:'F:\\\\TikTok\\\\@nasa', cancelled:false};
 window.tagResult = {ok:true, updated:1, failed:[], skipped:{no_meta:1,tagged:1,empty:0,filtered:0}, cancelled:false};
-window.learningOptions = {apiKeySet:false, provider:'openai', api_base:'https://api.openai.com/v1', model:'gpt-4o-mini'};
+window.learningOptions = {apiKeySet:false, keyEncrypted:false, provider:'openai', api_base:'https://api.openai.com/v1', model:'gpt-4o-mini'};
 window.pywebview = {api:(()=>{
   const explicit = {
     scan_assets: async f=>{window.calls.push('scan_assets:'+f);return window.scanResult},
@@ -70,6 +70,7 @@ window.pywebview = {api:(()=>{
     tag_assets: async (f,paths)=>{window.calls.push('tag_assets:'+f+'|'+(paths||[]).join(','));return window.tagResult},
     cancel_asset_tagging: async()=>{window.calls.push('cancel_asset_tagging');return {ok:true}},
     get_learning_options: async()=>window.learningOptions,
+    clear_learning_api_key: async()=>{window.calls.push('clear_learning_api_key');return {ok:true,removed:true}},
     choose_folder: async()=>{window.calls.push('choose_folder');return 'F:\\\\TikTok'},
     recent_profiles: async()=>[], refresh_recent_profiles: async()=>({ok:true,profiles:[]}),
     load_task_state: async()=>({ok:true,records:{}}), enrich: async()=>({updated:0}),
@@ -396,9 +397,19 @@ class AssetsUITest(unittest.TestCase):
         self.page.evaluate("assetTagging({done:true,updated:4,failed:1,total:5})")
         self.assertIn("成功 4 条", self.page.locator("#assetsMessage").inner_text())
 
-    def test_switching_the_provider_fills_in_its_defaults(self):
+    def open_ai_module(self, key_configured=True):
+        """设置页是分类面板，AI 配置在「AI 大模型」下。"""
+        if key_configured:
+            self.page.evaluate(
+                "window.learningOptions={apiKeySet:true,keyEncrypted:true,provider:'deepseek',"
+                "api_base:'https://api.deepseek.com/v1',model:'deepseek-chat'}")
         self.page.locator("#settings").click()
         self.page.wait_for_selector("#settingsModal:not(.hidden)")
+        self.page.locator('#settingsNav .settings-nav-item[data-module="ai"]').click()
+        self.page.wait_for_selector('#settingsModal .settings-module[data-module="ai"].active')
+
+    def test_switching_the_provider_fills_in_its_defaults(self):
+        self.open_ai_module()
         self.page.select_option("#learningProvider", "deepseek")
         self.assertEqual(self.page.input_value("#learningBase"), "https://api.deepseek.com/v1")
         self.assertEqual(self.page.input_value("#learningModel"), "deepseek-chat")
@@ -406,11 +417,29 @@ class AssetsUITest(unittest.TestCase):
         self.assertEqual(self.page.input_value("#learningModel"), "gpt-4o-mini")
 
     def test_custom_provider_leaves_what_the_user_typed_alone(self):
-        self.page.locator("#settings").click()
-        self.page.wait_for_selector("#settingsModal:not(.hidden)")
+        self.open_ai_module()
         self.page.fill("#learningBase", "https://my-gateway.local/v1")
         self.page.select_option("#learningProvider", "custom")
         self.assertEqual(self.page.input_value("#learningBase"), "https://my-gateway.local/v1")
+
+    def test_the_key_state_is_explained_without_ever_showing_the_key(self):
+        # 密钥是写只的：界面只说明"配没配、怎么存的"，永远显示不出值
+        self.open_ai_module()
+        note = self.page.locator("#learningKeyState").inner_text()
+        self.assertIn("DPAPI", note)
+        self.assertIn("留空表示不修改", note)
+        self.assertEqual(self.page.input_value("#learningKey"), "")
+        self.assertTrue(self.page.locator("#clearLearningKey").is_visible(),
+                        "已经配了密钥就该给出显式的清除入口")
+
+    def test_clearing_the_key_calls_the_backend_and_updates_the_note(self):
+        self.open_ai_module()
+        self.page.locator("#clearLearningKey").click()
+        self.page.wait_for_function("window.calls.includes('clear_learning_api_key')")
+        self.assertIn("已清除", self.page.locator("#settingsMessage").inner_text())
+        self.assertIn("尚未配置", self.page.locator("#learningKeyState").inner_text())
+        self.assertFalse(self.page.locator("#clearLearningKey").is_visible(),
+                         "清掉之后清除按钮该收起来")
 
     def test_closing_the_modal_works(self):
         self.open_modal()

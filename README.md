@@ -53,7 +53,7 @@ installer\build.ps1 -Installer
 python -m unittest discover -s tests -t tests -v
 ```
 
-372 个测试，全部离线（`-t tests` 不能省）。其中 `test_login_ui.py` /
+396 个测试，全部离线（`-t tests` 不能省）。其中 `test_login_ui.py` /
 `test_continue_ui.py` / `test_status_ui.py` / `test_open_profile_ui.py` 用真实浏览器加载
 UI 并注入假的 `window.pywebview.api`，断言零 JS 运行时错误。
 

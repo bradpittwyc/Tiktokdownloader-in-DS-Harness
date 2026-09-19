@@ -90,6 +90,9 @@ class LoginSettingsUITest(unittest.TestCase):
             # An unresolved status API must not keep the whole settings panel hidden.
             page.locator("#settings").click()
             self.assertTrue(page.locator("#settingsModal").is_visible())
+            # 设置页是分类面板；登录态在「账户与登录」下，不切过去就看不见
+            page.locator('#settingsNav .settings-nav-item[data-module="account"]').click()
+            page.wait_for_selector('#settingsModal .settings-module[data-module="account"].active')
             page.evaluate("""window.resolveCookieStatus({
                 ok:true,count:3,hasSession:false,source:'Chrome Cookie',busy:false
             })""")

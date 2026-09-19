@@ -79,9 +79,20 @@ class UpdaterUITest(unittest.TestCase):
         self.browser.close()
         self.playwright.stop()
 
-    def open_settings(self):
+    def open_settings(self, module="about"):
+        """打开设置并切到指定分类。
+
+        设置页现在是两列布局，每个分类是独立面板、同一时刻只有一个可见
+        （见 SETTINGS_STANDARD §2）。更新区在「关于」，Token 在「账户与登录」。
+        """
         self.page.locator("#settings").click()
         self.page.wait_for_selector("#settingsModal:not(.hidden)")
+        self.open_module(module)
+
+    def open_module(self, module):
+        self.page.locator(f'#settingsNav .settings-nav-item[data-module="{module}"]').click()
+        self.page.wait_for_selector(
+            f'#settingsModal .settings-module[data-module="{module}"].active')
 
     def test_settings_shows_the_current_version(self):
         self.open_settings()
@@ -144,7 +155,8 @@ class UpdaterUITest(unittest.TestCase):
         self.assertIn("50.0 / 100.0 MB", self.page.locator("#updateText").inner_text())
 
     def test_saving_a_token_calls_the_backend_and_clears_the_field(self):
-        self.open_settings()
+        # GitHub Token 在「账户与登录」分类下
+        self.open_settings("account")
         self.page.fill("#updateToken", "ghp_secret_value")
         self.page.locator("#saveUpdateToken").click()
         self.page.wait_for_function("window.calls.some(c=>c.startsWith('set_update_token:'))")
@@ -161,6 +173,54 @@ class UpdaterUITest(unittest.TestCase):
         self.page.wait_for_function("window.calls.some(c=>c.startsWith('open_release_page:'))")
         calls = self.page.evaluate("window.calls")
         self.assertTrue(any("releases/tag/v1.0.3" in c for c in calls))
+
+    # --- 设置页的分类结构（SETTINGS_STANDARD §2）------------------------
+
+    def test_the_settings_page_has_the_six_modules_in_order(self):
+        self.open_settings()
+        labels = self.page.eval_on_selector_all(
+            "#settingsNav .settings-nav-item", "els => els.map(e => e.dataset.module)")
+        self.assertEqual(labels, ["general", "appearance", "ai", "storage", "account", "about"])
+
+    def test_exactly_one_module_is_active_at_a_time(self):
+        self.open_settings()
+        for module in ("appearance", "ai", "storage", "account", "about", "general"):
+            self.open_module(module)
+            self.assertEqual(self.page.locator("#settingsNav .settings-nav-item.active").count(), 1,
+                             f"切到 {module} 后导航激活项不止一个")
+            self.assertEqual(self.page.locator("#settingsModal .settings-module.active").count(), 1,
+                             f"切到 {module} 后可见面板不止一个")
+            self.assertEqual(
+                self.page.locator("#settingsModal .settings-module.active").get_attribute("data-module"),
+                module)
+            self.assertEqual(self.page.locator("#settingsModuleTitle").inner_text(),
+                             {"general": "通用", "appearance": "外观", "ai": "AI 大模型",
+                              "storage": "存储", "account": "账户与登录",
+                              "about": "关于"}[module],
+                             "面板标题要跟着导航走（模块自己不许渲染页头）")
+
+    def test_the_active_module_is_not_persisted(self):
+        # 标准 §2 规则②：激活哪个模块是视图状态，不许当成设置存下来
+        self.open_settings()                 # 助手默认切到「关于」
+        self.open_module("about")
+        self.page.locator("#settingsCancel").click()
+        # 注意：wait_for_selector 默认等"可见"，而隐藏元素永远不可见，会一直等到超时
+        self.page.wait_for_function(
+            "document.getElementById('settingsModal').classList.contains('hidden')")
+        # 重新打开要**直接点按钮**：helpers 的 open_settings() 自己会切模块，
+        # 用它就测不出"记没记住"了
+        self.page.locator("#settings").click()
+        self.page.wait_for_selector("#settingsModal:not(.hidden)")
+        self.assertEqual(
+            self.page.locator("#settingsModal .settings-module.active").get_attribute("data-module"),
+            "general", "重新打开必须回到第一个分类")
+
+    def test_the_appearance_module_explains_itself_instead_of_being_blank(self):
+        # 标准 §2 规则③：模块不可用时也必须渲染并自我解释
+        self.open_settings("appearance")
+        text = self.page.locator('#settingsModal .settings-module[data-module="appearance"]').inner_text()
+        self.assertIn("深色主题", text)
+        self.assertGreater(len(text.strip()), 20, "不许静默空白")
 
 
 if __name__ == "__main__":
